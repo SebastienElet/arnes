@@ -1,6 +1,6 @@
 {
   "name": "@sebastienelet/arnes",
-  "version": "1.0.0",
+  "version": "0.0.1",
   "description": "Coding-agent configuration, diagnostics, sync and export",
   "type": "module",
   "license": "BSD-3-Clause",
@@ -33,8 +33,8 @@
     "packages/*"
   ],
   "optionalDependencies": {
-    "@sebastienelet/arnes-darwin-arm64": "1.0.0",
-    "@sebastienelet/arnes-linux-x64-gnu": "1.0.0"
+    "@sebastienelet/arnes-darwin-arm64": "0.0.1",
+    "@sebastienelet/arnes-linux-x64-gnu": "0.0.1"
   },
   "scripts": {
     "build": "bun scripts/build.mjs",
