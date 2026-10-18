@@ -1,0 +1,98 @@
+use arnes::diagnostic::ColorMode;
+use arnes::hooks::SetupHooksArgs;
+use arnes::manifest::{Agent, Scope};
+use clap::{Parser, Subcommand, ValueEnum};
+
+#[derive(Parser)]
+#[command(version, about = "Diagnose agent harness resources")]
+pub struct Cli {
+    #[command(subcommand)]
+    pub(crate) command: Command,
+}
+
+#[derive(Subcommand)]
+pub enum Command {
+    Sync(crate::sync_cli::SyncArgs),
+    Export {
+        #[arg(long)]
+        sources: Option<std::path::PathBuf>,
+        #[arg(long)]
+        check: bool,
+    },
+    Doctor {
+        #[arg(value_enum)]
+        resource: Option<Resource>,
+        #[arg(long, value_enum)]
+        agent: Option<Agent>,
+        #[arg(long, value_enum)]
+        scope: Option<Scope>,
+        #[arg(long, value_enum, default_value_t)]
+        format: Format,
+        #[arg(long, value_enum, default_value_t)]
+        color: Color,
+        #[arg(short, long)]
+        verbose: bool,
+    },
+    Setup {
+        #[command(subcommand)]
+        command: SetupCommand,
+    },
+}
+
+#[derive(Subcommand, Clone, Copy)]
+pub enum SetupCommand {
+    Hooks(SetupHooksArgs),
+}
+
+#[derive(Clone, Copy, Eq, PartialEq, ValueEnum)]
+pub enum Resource {
+    Manifest,
+    Config,
+    Instructions,
+    Skills,
+    Prompts,
+    Commands,
+    Rules,
+    Hooks,
+    Mcp,
+    Statusline,
+}
+
+#[derive(Clone, Copy, Default, Eq, PartialEq, ValueEnum)]
+pub enum Format {
+    #[default]
+    Human,
+    Json,
+}
+
+#[derive(Clone, Copy, Default, Eq, PartialEq, ValueEnum)]
+pub enum Color {
+    #[default]
+    Auto,
+    Always,
+    Never,
+}
+
+impl From<Color> for ColorMode {
+    fn from(color: Color) -> Self {
+        match color {
+            Color::Auto => Self::Auto,
+            Color::Always => Self::Always,
+            Color::Never => Self::Never,
+        }
+    }
+}
+
+pub fn validate_render_options(
+    format: Format,
+    verbose: bool,
+    color: Color,
+) -> Result<(), &'static str> {
+    if verbose && format == Format::Json {
+        return Err("--verbose cannot be used with --format json");
+    }
+    if color == Color::Always && format == Format::Json {
+        return Err("--color always cannot be used with --format json");
+    }
+    Ok(())
+}

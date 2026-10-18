@@ -1,0 +1,26 @@
+{
+  "lockfileVersion": 2,
+  "configVersion": 1,
+  "workspaces": {
+    "": {
+      "name": "@sebastienelet/arnes",
+      "optionalDependencies": {
+        "@sebastienelet/arnes-darwin-arm64": "1.0.0",
+        "@sebastienelet/arnes-linux-x64-gnu": "1.0.0",
+      },
+    },
+    "packages/darwin-arm64": {
+      "name": "@sebastienelet/arnes-darwin-arm64",
+      "version": "1.0.0",
+    },
+    "packages/linux-x64-gnu": {
+      "name": "@sebastienelet/arnes-linux-x64-gnu",
+      "version": "1.0.0",
+    },
+  },
+  "packages": {
+    "@sebastienelet/arnes-darwin-arm64": ["@sebastienelet/arnes-darwin-arm64@workspace:packages/darwin-arm64"],
+
+    "@sebastienelet/arnes-linux-x64-gnu": ["@sebastienelet/arnes-linux-x64-gnu@workspace:packages/linux-x64-gnu"],
+  }
+}
