@@ -44,7 +44,7 @@ fn receipt(
         agent: expected.agent.to_string(),
         scope: expected.scope.to_string(),
         name: expected.name.to_owned(),
-        digest: format!("{:x}", digest.finalize()),
+        digest: hex::encode(digest.finalize()),
     })
 }
 

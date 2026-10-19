@@ -160,7 +160,7 @@ impl Prepared {
 }
 
 fn hash(bytes: &[u8]) -> String {
-    format!("{:x}", Sha256::digest(bytes))
+    hex::encode(Sha256::digest(bytes))
 }
 
 type ObservedFile = (Option<Vec<u8>>, Option<(u64, u64)>);
