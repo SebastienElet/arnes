@@ -3,6 +3,30 @@ use super::{REQUIRED_SOURCES, arnes, configured_fixture, generate, git};
 use std::fs;
 use std::os::unix::fs::symlink;
 #[test]
+fn source_hashes_preserve_lowercase_zero_padded_sha256()
+-> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    for (contents, expected) in [
+        (
+            "",
+            "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        ),
+        (
+            "abc",
+            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+        ),
+    ] {
+        let fixture = configured_fixture()?;
+        fixture.write_repository("harness/AGENTS.md", contents)?;
+        generate(&fixture)?;
+        let manifest =
+            fs::read_to_string(fixture.repository().join(".harness-export/00-MANIFEST.md"))?;
+        assert!(manifest.contains(&format!(
+            "| harness/AGENTS.md | file | 10-INSTRUCTIONS.md | {expected} |"
+        )));
+    }
+    Ok(())
+}
+#[test]
 fn records_metadata_sources_and_symlink_identity()
 -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let fixture = configured_fixture()?;

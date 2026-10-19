@@ -119,5 +119,5 @@ pub(super) fn run_git(repository: &Path, arguments: &[&str]) -> Result<Vec<u8>, 
 }
 
 fn sha256(contents: &str) -> String {
-    format!("{:x}", Sha256::digest(contents.as_bytes()))
+    hex::encode(Sha256::digest(contents.as_bytes()))
 }
