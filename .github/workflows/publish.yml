@@ -27,7 +27,6 @@ jobs:
       - uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6.3.0
         with:
           node-version: 24.21.0
-          registry-url: https://registry.npmjs.org
           package-manager-cache: false
       - run: bun install --frozen-lockfile --ignore-scripts
       - run: cargo test --all-features --locked
@@ -35,7 +34,13 @@ jobs:
       - run: bun test tests/launcher.test.mjs
       - run: bun pm pack --ignore-scripts --destination ../../dist
         working-directory: packages/${{ matrix.variant }}
-      - run: npm publish ./dist/sebastienelet-arnes-${{ matrix.variant }}-0.0.1.tgz --provenance --access public --registry https://registry.npmjs.org --ignore-scripts
+      - run: |
+          package="@sebastienelet/arnes-${{ matrix.variant }}"
+          if published_version=$(npm view "$package@0.0.1" version --registry https://registry.npmjs.org) && [ "$published_version" = "0.0.1" ]; then
+            echo "$package@0.0.1 already published; skipping publication."
+          else
+            npm publish ./dist/sebastienelet-arnes-${{ matrix.variant }}-0.0.1.tgz --provenance --access public --registry https://registry.npmjs.org --ignore-scripts --loglevel verbose
+          fi
   entry:
     needs: native
     runs-on: ubuntu-24.04
@@ -53,7 +58,12 @@ jobs:
       - uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6.3.0
         with:
           node-version: 24.21.0
-          registry-url: https://registry.npmjs.org
           package-manager-cache: false
       - run: bun pm pack --ignore-scripts --destination dist
-      - run: npm publish ./dist/sebastienelet-arnes-0.0.1.tgz --provenance --access public --registry https://registry.npmjs.org --ignore-scripts
+      - run: |
+          package="@sebastienelet/arnes"
+          if published_version=$(npm view "$package@0.0.1" version --registry https://registry.npmjs.org) && [ "$published_version" = "0.0.1" ]; then
+            echo "$package@0.0.1 already published; skipping publication."
+          else
+            npm publish ./dist/sebastienelet-arnes-0.0.1.tgz --provenance --access public --registry https://registry.npmjs.org --ignore-scripts --loglevel verbose
+          fi
