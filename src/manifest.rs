@@ -124,6 +124,13 @@ impl Manifest {
             .map(|skill| skill.slug.as_str())
     }
 
+    pub(crate) fn skill_sources(&self, collection: &Path) -> impl Iterator<Item = PathBuf> {
+        self.0
+            .skills
+            .iter()
+            .map(move |skill| collection.join(&skill.slug))
+    }
+
     pub fn external_roots(&self) -> impl Iterator<Item = ExternalRoot<'_>> {
         self.0.external.roots()
     }
