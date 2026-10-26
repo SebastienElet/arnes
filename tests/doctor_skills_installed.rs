@@ -7,6 +7,26 @@ use skill_support::{MANIFEST, configured_fixture, run};
 type TestResult = Result<(), Box<dyn std::error::Error + Send + Sync>>;
 
 #[test]
+fn local_preserves_the_same_agent_and_scope_filters_as_default_doctor() -> TestResult {
+    let fixture = configured_fixture()?;
+    for filters in [
+        vec![],
+        vec!["--agent", "claude"],
+        vec!["--scope", "user"],
+        vec!["--scope", "project"],
+        vec!["--agent", "cursor", "--scope", "project"],
+    ] {
+        let mut args = vec!["doctor", "skills", "--format", "json"];
+        args.extend(filters);
+        let expected = run(&fixture, &args)?;
+        args.push("--local");
+        let actual = run(&fixture, &args)?;
+        assert_eq!(actual, expected, "{args:?}");
+    }
+    Ok(())
+}
+
+#[test]
 fn installed_skills_apply_budget_and_requires_but_allow_dated_files() -> TestResult {
     let fixture = configured_fixture()?;
     fixture.write_repository(

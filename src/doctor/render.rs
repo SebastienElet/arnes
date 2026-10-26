@@ -15,6 +15,17 @@ const DEFAULT_RESOURCES: [Resource; 10] = [
     Resource::Statusline,
 ];
 
+pub(super) fn repository(
+    diagnostics: Vec<Diagnostic>,
+    path: &std::path::Path,
+    options: HumanOptions,
+) -> (String, u8) {
+    let report = Report::new(diagnostics);
+    let context =
+        HumanContext::new("Skills").with_qualifier(format!("repository {}", path.display()));
+    (report.human(&context, options), report.exit_code())
+}
+
 pub(super) fn human(
     diagnostics: Vec<Diagnostic>,
     resource: Option<Resource>,

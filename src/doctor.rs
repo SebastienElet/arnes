@@ -39,19 +39,10 @@ pub fn run(args: DoctorArgs) -> ExitCode {
         ));
         return ExitCode::from(2);
     }
-    let diagnostics = match (path.as_deref(), local) {
-        (Some(path), local) => skills::diagnose_path(path, local),
-        (None, true) => match Roots::from_environment() {
-            Ok(roots) => match manifest::load(roots.home()) {
-                Ok(manifest) => {
-                    skills::diagnose_local(&roots, &manifest, agent, scope.or(Some(Scope::User)))
-                }
-                Err(error) => vec![Diagnostic::new("skills", State::Error, error.to_string())],
-            },
-            Err(error) => vec![Diagnostic::new("skills", State::Error, error.to_string())],
-        },
-        (None, false) => diagnose(resource, agent, scope),
-    };
+    let diagnostics = path.as_deref().map_or_else(
+        || diagnose(resource, agent, scope, local),
+        |path| skills::diagnose_path(path, local),
+    );
     let human_options = (if verbose {
         HumanOptions::verbose()
     } else {
@@ -66,9 +57,12 @@ pub fn run(args: DoctorArgs) -> ExitCode {
         Some(Resource::Statusline) => scope,
         _ => resource.and_then(|_| scope.or(Some(Scope::User))).or(scope),
     };
-    let (output, exit_code) = match format {
-        Format::Human => render::human(diagnostics, resource, agent, rendered_scope, human_options),
-        Format::Json => {
+    let (output, exit_code) = match (format, path.as_deref()) {
+        (Format::Human, Some(path)) => render::repository(diagnostics, path, human_options),
+        (Format::Human, None) => {
+            render::human(diagnostics, resource, agent, rendered_scope, human_options)
+        }
+        (Format::Json, _) => {
             let report = Report::new(diagnostics);
             (
                 match report.json() {
@@ -97,6 +91,7 @@ fn diagnose(
     resource: Option<Resource>,
     agent: Option<Agent>,
     scope: Option<Scope>,
+    local: bool,
 ) -> Vec<Diagnostic> {
     match resource {
         None => diagnose_default(agent, scope),
@@ -117,7 +112,7 @@ fn diagnose(
             )],
         },
         Some(Resource::Skills) => match Roots::from_environment() {
-            Ok(roots) => diagnose_skills(&roots, agent, scope.or(Some(Scope::User))),
+            Ok(roots) => diagnose_skills(&roots, agent, scope.or(Some(Scope::User)), local),
             Err(error) => vec![Diagnostic::new("skills", State::Error, error.to_string())],
         },
         Some(Resource::Prompts) => match Roots::from_environment() {
@@ -207,8 +202,14 @@ fn diagnose_instructions(
     }
 }
 
-fn diagnose_skills(roots: &Roots, agent: Option<Agent>, scope: Option<Scope>) -> Vec<Diagnostic> {
+fn diagnose_skills(
+    roots: &Roots,
+    agent: Option<Agent>,
+    scope: Option<Scope>,
+    local: bool,
+) -> Vec<Diagnostic> {
     match manifest::load(roots.home()) {
+        Ok(manifest) if local => skills::diagnose_local(roots, &manifest, agent, scope),
         Ok(manifest) => skills::diagnose(roots, &manifest, agent, scope),
         Err(error) => vec![Diagnostic::new("skills", State::Error, error.to_string())],
     }

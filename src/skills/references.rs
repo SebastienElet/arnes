@@ -4,7 +4,7 @@ use std::path::{Component, Path, PathBuf};
 
 mod parser;
 
-use parser::local_references;
+use parser::{Reference, local_references};
 
 pub fn validate(skill: &Path, subject: &str) -> Result<(), Diagnostic> {
     validate_declared(skill, subject, &[])
@@ -40,10 +40,12 @@ pub fn diagnose_declared(skill: &Path, subject: &str, declared: &[PathBuf]) -> V
                 continue;
             }
         };
-        let base = file.parent().unwrap_or(skill);
         for (line, reference) in local_references(&contents) {
-            if let Err(diagnostic) = validate_reference(skill, base, &reference, subject, declared)
-            {
+            let (base, reference) = match &reference {
+                Reference::DocumentRelative(path) => (file.parent().unwrap_or(skill), path),
+                Reference::SkillRelative(path) => (skill, path),
+            };
+            if let Err(diagnostic) = validate_reference(skill, base, reference, subject, declared) {
                 let measurement = diagnostic.message.clone();
                 diagnostics.push(diagnostic.with_finding(&file, line, "link", measurement, None));
             }

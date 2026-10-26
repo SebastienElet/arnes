@@ -30,6 +30,102 @@ fn repository_mode_needs_neither_home_nor_manifest() -> TestResult {
     assert_eq!(budget["rule"], "budget");
     assert_eq!(budget["tokenizer"], "o200k_base");
     assert_eq!(budget["state"], "healthy");
+    let human = String::from_utf8(run(&directory, &[])?.stdout)?;
+    assert_eq!(human.lines().next(), Some("Skills · repository skills"));
+    Ok(())
+}
+
+#[test]
+fn bare_resource_tokens_use_skill_root_and_markdown_links_use_document_directory() -> TestResult {
+    let directory = tempfile::tempdir()?;
+    for resource in ["agents", "assets", "evals", "references", "scripts"] {
+        fs::create_dir_all(directory.path().join("skills/alpha").join(resource))?;
+    }
+    for (file, contents) in [
+        ("SKILL.md", "# Alpha\n"),
+        (
+            "references/x.md",
+            "`agents/` `assets/` `evals/` `references/` `scripts/`\n[guide](guide.md)\n",
+        ),
+        ("references/guide.md", "# Local guide\n"),
+        ("guide.md", "# Root guide decoy\n"),
+        ("references/forges.md", "# Forges\n"),
+        ("assets/verdict-template.md", "`references/forges.md`\n"),
+    ] {
+        fs::write(directory.path().join("skills/alpha").join(file), contents)?;
+    }
+    let output = run(&directory, &["--format", "json"])?;
+    assert_eq!(output.status.code(), Some(0), "{output:?}");
+    fs::remove_file(directory.path().join("skills/alpha/references/guide.md"))?;
+    let output = run(&directory, &["--format", "json"])?;
+    assert_eq!(output.status.code(), Some(1), "{output:?}");
+    let diagnostics: serde_json::Value = serde_json::from_slice(&output.stdout)?;
+    let links = diagnostics
+        .as_array()
+        .ok_or("expected diagnostics")?
+        .iter()
+        .filter(|value| value["rule"] == "link")
+        .collect::<Vec<_>>();
+    assert_eq!(links.len(), 1, "{diagnostics}");
+    let link = links.first().ok_or("missing link")?;
+    assert_eq!(link["file"], "skills/alpha/references/x.md");
+    assert_eq!(link["line"], 2);
+    assert_eq!(link["state"], "drift");
+    Ok(())
+}
+
+#[test]
+fn explicit_relative_tokens_keep_the_document_directory_as_their_base() -> TestResult {
+    let directory = tempfile::tempdir()?;
+    fs::create_dir_all(directory.path().join("skills/alpha/references"))?;
+    for (file, contents) in [
+        ("SKILL.md", "# Alpha\n"),
+        ("references/x.md", "`./guide.md` `../root-guide.md`\n"),
+        ("references/guide.md", "# Local guide\n"),
+        ("root-guide.md", "# Root guide\n"),
+    ] {
+        fs::write(directory.path().join("skills/alpha").join(file), contents)?;
+    }
+    let output = run(&directory, &["--format", "json"])?;
+    assert_eq!(output.status.code(), Some(0), "{output:?}");
+    Ok(())
+}
+
+#[test]
+fn markdown_targets_with_whitespace_are_not_reinterpreted_as_bare_tokens() -> TestResult {
+    let directory = tempfile::tempdir()?;
+    fs::create_dir_all(directory.path().join("skills/alpha/references/references"))?;
+    fs::create_dir(directory.path().join("skills/alpha/assets"))?;
+    fs::write(directory.path().join("skills/alpha/SKILL.md"), "# Alpha\n")?;
+    fs::write(
+        directory
+            .path()
+            .join("skills/alpha/references/references/guide.md"),
+        "# Local guide\n",
+    )?;
+    for contents in [
+        "[guide]( references/guide.md )\n`assets/`\n",
+        "[guide](\nreferences/guide.md\n)\n`assets/`\n",
+    ] {
+        fs::write(
+            directory.path().join("skills/alpha/references/x.md"),
+            contents,
+        )?;
+        let output = run(&directory, &["--format", "json"])?;
+        assert_eq!(output.status.code(), Some(0), "{output:?}");
+    }
+    fs::remove_dir(directory.path().join("skills/alpha/assets"))?;
+    let output = run(&directory, &["--format", "json"])?;
+    assert_eq!(output.status.code(), Some(1), "{output:?}");
+    let diagnostics: serde_json::Value = serde_json::from_slice(&output.stdout)?;
+    let links = diagnostics
+        .as_array()
+        .ok_or("expected diagnostics")?
+        .iter()
+        .filter(|value| value["rule"] == "link")
+        .collect::<Vec<_>>();
+    assert_eq!(links.len(), 1, "{diagnostics}");
+    assert_eq!(links.first().ok_or("missing link")?["line"], 4);
     Ok(())
 }
 
