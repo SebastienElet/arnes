@@ -1,4 +1,4 @@
-use crate::cli::{Color, Format, Resource, validate_render_options};
+use crate::cli::{DoctorArgs, Format, Resource, validate_render_options};
 use crate::cli_output::write_output;
 use arnes::Roots;
 use arnes::commands;
@@ -17,20 +17,41 @@ use std::process::ExitCode;
 
 mod render;
 
-pub fn run(
-    resource: Option<Resource>,
-    agent: Option<Agent>,
-    scope: Option<Scope>,
-    format: Format,
-    color: Color,
-    verbose: bool,
-) -> ExitCode {
+pub fn run(args: DoctorArgs) -> ExitCode {
+    let DoctorArgs {
+        resource,
+        agent,
+        scope,
+        format,
+        color,
+        verbose,
+        path,
+        local,
+    } = args;
     if let Err(error) = validate_render_options(format, verbose, color) {
         let _ = crate::cli_output::write_error(format_args!("{error}"));
         return ExitCode::from(2);
     }
 
-    let diagnostics = diagnose(resource, agent, scope);
+    if (path.is_some() || local) && resource != Some(Resource::Skills) {
+        let _ = crate::cli_output::write_error(format_args!(
+            "--path and --local require doctor skills"
+        ));
+        return ExitCode::from(2);
+    }
+    let diagnostics = match (path.as_deref(), local) {
+        (Some(path), local) => skills::diagnose_path(path, local),
+        (None, true) => match Roots::from_environment() {
+            Ok(roots) => match manifest::load(roots.home()) {
+                Ok(manifest) => {
+                    skills::diagnose_local(&roots, &manifest, agent, scope.or(Some(Scope::User)))
+                }
+                Err(error) => vec![Diagnostic::new("skills", State::Error, error.to_string())],
+            },
+            Err(error) => vec![Diagnostic::new("skills", State::Error, error.to_string())],
+        },
+        (None, false) => diagnose(resource, agent, scope),
+    };
     let human_options = (if verbose {
         HumanOptions::verbose()
     } else {

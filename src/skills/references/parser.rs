@@ -1,13 +1,16 @@
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
-pub fn local_references(contents: &str) -> BTreeSet<PathBuf> {
+pub fn local_references(contents: &str) -> BTreeSet<(usize, PathBuf)> {
     let visible = without_fenced_code(contents);
     let mut references = markdown_targets(&visible)
         .into_iter()
-        .filter_map(|value| markdown_candidate(&value))
+        .filter_map(|(line, value)| markdown_candidate(&value).map(|path| (line, path)))
         .collect::<BTreeSet<_>>();
-    references.extend(resource_tokens(&visible).filter_map(token_candidate));
+    references.extend(visible.lines().enumerate().flat_map(|(index, line)| {
+        resource_tokens(line)
+            .filter_map(move |token| token_candidate(token).map(|path| (index + 1, path)))
+    }));
     references
 }
 
@@ -25,8 +28,8 @@ fn without_fenced_code(contents: &str) -> String {
             }
         } else if fence.is_none() {
             visible.push_str(line);
-            visible.push('\n');
         }
+        visible.push('\n');
     }
     visible
 }
@@ -43,7 +46,7 @@ fn fence_marker(line: &str) -> Option<(char, usize)> {
     (length >= 3).then_some((character, length))
 }
 
-fn markdown_targets(contents: &str) -> Vec<String> {
+fn markdown_targets(contents: &str) -> Vec<(usize, String)> {
     let mut targets = Vec::new();
     let mut search = 0;
     while let Some(offset) = contents[search..].find("](") {
@@ -51,7 +54,14 @@ fn markdown_targets(contents: &str) -> Vec<String> {
         let Some((end, target)) = balanced_target(contents, start) else {
             break;
         };
-        targets.push(target);
+        let line = contents
+            .get(..start)
+            .unwrap_or_default()
+            .bytes()
+            .filter(|byte| *byte == b'\n')
+            .count()
+            + 1;
+        targets.push((line, target));
         search = end + 1;
     }
     targets
@@ -149,9 +159,9 @@ mod tests {
         assert_eq!(
             local_references(contents).into_iter().collect::<Vec<_>>(),
             vec![
-                PathBuf::from("guide.md"),
-                PathBuf::from("references/a(b).md"),
-                PathBuf::from("scripts/run.sh")
+                (1, PathBuf::from("guide.md")),
+                (1, PathBuf::from("references/a(b).md")),
+                (1, PathBuf::from("scripts/run.sh"))
             ]
         );
     }

@@ -19,24 +19,31 @@ pub enum Command {
         #[arg(long)]
         check: bool,
     },
-    Doctor {
-        #[arg(value_enum)]
-        resource: Option<Resource>,
-        #[arg(long, value_enum)]
-        agent: Option<Agent>,
-        #[arg(long, value_enum)]
-        scope: Option<Scope>,
-        #[arg(long, value_enum, default_value_t)]
-        format: Format,
-        #[arg(long, value_enum, default_value_t)]
-        color: Color,
-        #[arg(short, long)]
-        verbose: bool,
-    },
+    Doctor(DoctorArgs),
     Setup {
         #[command(subcommand)]
         command: SetupCommand,
     },
+}
+
+#[derive(clap::Args)]
+pub struct DoctorArgs {
+    #[arg(value_enum)]
+    pub resource: Option<Resource>,
+    #[arg(long, value_enum)]
+    pub agent: Option<Agent>,
+    #[arg(long, value_enum)]
+    pub scope: Option<Scope>,
+    #[arg(long, value_enum, default_value_t)]
+    pub format: Format,
+    #[arg(long, value_enum, default_value_t)]
+    pub color: Color,
+    #[arg(short, long)]
+    pub verbose: bool,
+    #[arg(long, conflicts_with_all = ["agent", "scope"])]
+    pub path: Option<std::path::PathBuf>,
+    #[arg(long)]
+    pub local: bool,
 }
 
 #[derive(Subcommand, Clone, Copy)]

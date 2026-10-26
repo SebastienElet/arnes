@@ -124,6 +124,7 @@ fn counts(diagnostics: &[(usize, &Diagnostic)], color: Colorizer) -> String {
         matches!(state, State::Error | State::Drift)
     });
     let unsupported = count(diagnostics, |state| state == State::Unsupported);
+    let warnings = count(diagnostics, |state| state == State::Warning);
     let healthy = count(diagnostics, |state| state == State::Healthy);
     let mut parts = Vec::new();
     if issues > 0 {
@@ -139,6 +140,9 @@ fn counts(diagnostics: &[(usize, &Diagnostic)], color: Colorizer) -> String {
     }
     if unsupported > 0 {
         parts.push(color.paint(State::Unsupported, format!("{unsupported} unsupported")));
+    }
+    if warnings > 0 {
+        parts.push(color.paint(State::Warning, format!("{warnings} warning")));
     }
     parts.push(color.paint(State::Healthy, format!("{healthy} healthy")));
     parts.join(" · ")
@@ -162,8 +166,9 @@ fn section_rank(section: &Section<'_>) -> u8 {
 
 const fn state_rank(state: State) -> u8 {
     match state {
-        State::Error => 3,
-        State::Drift => 2,
+        State::Error => 4,
+        State::Drift => 3,
+        State::Warning => 2,
         State::Unsupported => 1,
         State::Healthy => 0,
     }
