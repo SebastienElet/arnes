@@ -25,7 +25,7 @@ pub fn leaf(
         Scope::User => roots.deployment_repository(),
         Scope::Project => roots.repository(),
     };
-    let source = source_root.join(resource.source).join(name);
+    let source = source_root.join(manifest.skill_source(name, resource.source));
     let declared = manifest
         .skill_sources(resource.source)
         .filter_map(|source| {

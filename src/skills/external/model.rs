@@ -6,6 +6,12 @@ use std::path::PathBuf;
 mod collisions;
 mod human;
 
+const CURSOR_PROJECTION_DETAIL: &str = concat!(
+    "Cursor local projection is present; ",
+    "local import authorization and marketplace precedence are not observed",
+);
+const REQUIRED_PLUGIN_DISABLED_DETAIL: &str = "required plugin is disabled";
+
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub(super) enum Exposure {
     Enabled,
@@ -76,6 +82,23 @@ pub(super) fn plugin_diagnostics(
     scope: Scope,
     mut plugins: Vec<Plugin>,
 ) -> Vec<Diagnostic> {
+    let required = manifest
+        .required_external_plugins(agent, scope)
+        .collect::<Vec<_>>();
+    for id in &required {
+        if !plugins.iter().any(|plugin| plugin.id == *id) {
+            plugins.push(Plugin {
+                id: (*id).to_owned(),
+                artifact: None,
+                version: None,
+                path: None,
+                exposure: Exposure::Disabled,
+                topology: Topology::Missing,
+                detail: Some("required plugin is not installed".to_owned()),
+                skills: Vec::new(),
+            });
+        }
+    }
     collisions::mark(&mut plugins);
     plugins.sort_by(|left, right| {
         left.id
@@ -90,9 +113,19 @@ pub(super) fn plugin_diagnostics(
         .collect::<Vec<_>>();
     plugins
         .into_iter()
-        .flat_map(|plugin| {
+        .flat_map(|mut plugin| {
             let plugin_allowed = allowed.contains(&plugin.id.as_str());
-            let mut diagnostics = vec![plugin_diagnostic(agent, scope, &plugin, plugin_allowed)];
+            let plugin_required = required.contains(&plugin.id.as_str());
+            if plugin_required && let Some(detail) = required_plugin_detail(agent, &plugin) {
+                plugin.detail = Some(detail.to_owned());
+            }
+            let mut diagnostics = vec![plugin_diagnostic(
+                agent,
+                scope,
+                &plugin,
+                plugin_allowed,
+                plugin_required,
+            )];
             diagnostics.extend(plugin.skills.iter().map(|skill| {
                 let skill_allowed = plugin_allowed
                     && allowed_skills.iter().any(|allowed| {
@@ -105,7 +138,30 @@ pub(super) fn plugin_diagnostics(
         .collect()
 }
 
-fn plugin_diagnostic(agent: Agent, scope: Scope, plugin: &Plugin, allowed: bool) -> Diagnostic {
+fn required_plugin_detail(agent: Agent, plugin: &Plugin) -> Option<&'static str> {
+    if agent == Agent::Cursor
+        && plugin.exposure == Exposure::Enabled
+        && plugin.topology == Topology::Healthy
+    {
+        return Some(CURSOR_PROJECTION_DETAIL);
+    }
+    if plugin.exposure == Exposure::Disabled && plugin.detail.is_none() {
+        return Some(REQUIRED_PLUGIN_DISABLED_DETAIL);
+    }
+    None
+}
+
+fn plugin_is_unavailable(plugin: &Plugin) -> bool {
+    plugin.topology == Topology::Missing || plugin.exposure != Exposure::Enabled
+}
+
+fn plugin_diagnostic(
+    agent: Agent,
+    scope: Scope,
+    plugin: &Plugin,
+    allowed: bool,
+    required: bool,
+) -> Diagnostic {
     let removal = if allowed {
         String::new()
     } else {
@@ -118,7 +174,9 @@ fn plugin_diagnostic(agent: Agent, scope: Scope, plugin: &Plugin, allowed: bool)
         "skills",
         match state(plugin.topology, plugin.exposure, allowed) {
             State::Error => State::Error,
+            State::Unsupported if required => State::Error,
             _ if !allowed => State::Drift,
+            State::Healthy if required && plugin_is_unavailable(plugin) => State::Drift,
             state @ (State::Healthy | State::Drift | State::Unsupported | State::Warning) => state,
         },
         format!(
@@ -147,6 +205,7 @@ const fn plugin_activation(agent: Agent, plugin: &Plugin) -> &'static str {
     match (agent, plugin.topology, plugin.exposure) {
         (_, Topology::Missing, Exposure::Enabled) => "unavailable",
         (Agent::Codex, Topology::Unknown, Exposure::Enabled | Exposure::Unknown) => "unknown",
+        (Agent::Cursor, Topology::Healthy, Exposure::Enabled) => "unobserved",
         _ => activation(plugin.exposure),
     }
 }
@@ -170,7 +229,7 @@ fn skill_diagnostic(
             plugin.exposure,
             skill.topology,
             policy(allowed),
-            activation(plugin.exposure),
+            plugin_activation(agent, plugin),
             skill.path.display(),
             detail(skill.detail.as_deref()),
         ),
