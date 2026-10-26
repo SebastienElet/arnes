@@ -10,6 +10,7 @@ use std::path::{Path, PathBuf};
 pub(super) enum SourceKind {
     Rule,
     Skill,
+    CustomSkill,
     SkillRoot,
 }
 
@@ -48,7 +49,9 @@ impl LinkIntent {
 
     pub fn protected_source(&self) -> Result<PathBuf, String> {
         let protected = match self.kind {
-            SourceKind::Rule | SourceKind::SkillRoot => self.source.as_path(),
+            SourceKind::Rule | SourceKind::CustomSkill | SourceKind::SkillRoot => {
+                self.source.as_path()
+            }
             SourceKind::Skill => self
                 .source
                 .parent()
@@ -70,7 +73,7 @@ impl LinkIntent {
                 fs::read_to_string(&source)
                     .map_err(|_| "source could not be read as text".to_owned())?;
             }
-            SourceKind::Skill => {
+            SourceKind::Skill | SourceKind::CustomSkill => {
                 let collection = self.protected_source()?;
                 validate_skill_collection(&collection, &self.source_root, Scope::User)?;
                 if !source.starts_with(&collection) {
@@ -228,9 +231,13 @@ pub(super) fn select(
                                 id: format!("{}:{slug}", projection.id),
                                 root: root.to_owned(),
                                 destination: projection.destination.join(slug),
-                                source: source_root.join(source).join(slug),
+                                source: source_root.join(manifest.skill_source(slug, source)),
                                 source_root: source_root.to_owned(),
-                                kind: SourceKind::Skill,
+                                kind: if manifest.custom_skill_source(slug).is_some() {
+                                    SourceKind::CustomSkill
+                                } else {
+                                    SourceKind::Skill
+                                },
                             });
                         }
                     }

@@ -124,11 +124,26 @@ impl Manifest {
             .map(|skill| skill.slug.as_str())
     }
 
-    pub(crate) fn skill_sources(&self, collection: &Path) -> impl Iterator<Item = PathBuf> {
+    pub(crate) fn custom_skill_source(&self, slug: &str) -> Option<&Path> {
         self.0
             .skills
             .iter()
-            .map(move |skill| collection.join(&skill.slug))
+            .find(|skill| skill.slug == slug)
+            .and_then(|skill| skill.source.as_deref())
+    }
+
+    pub(crate) fn skill_source(&self, slug: &str, collection: &Path) -> PathBuf {
+        self.custom_skill_source(slug)
+            .map_or_else(|| collection.join(slug), Path::to_path_buf)
+    }
+
+    pub(crate) fn skill_sources(&self, collection: &Path) -> impl Iterator<Item = PathBuf> {
+        self.0.skills.iter().map(move |skill| {
+            skill
+                .source
+                .clone()
+                .unwrap_or_else(|| collection.join(&skill.slug))
+        })
     }
 
     pub fn external_roots(&self) -> impl Iterator<Item = ExternalRoot<'_>> {
@@ -137,6 +152,14 @@ impl Manifest {
 
     pub fn external_plugins(&self, agent: Agent, scope: Scope) -> impl Iterator<Item = &str> {
         self.0.external.plugins(agent, scope)
+    }
+
+    pub(crate) fn required_external_plugins(
+        &self,
+        agent: Agent,
+        scope: Scope,
+    ) -> impl Iterator<Item = &str> {
+        self.0.external.required_plugins(agent, scope)
     }
 
     pub fn external_skills(
@@ -182,6 +205,7 @@ pub struct SkillProjection<'a> {
 #[serde(deny_unknown_fields)]
 struct SkillDeclaration {
     slug: String,
+    source: Option<PathBuf>,
     installations: Vec<SkillInstallation>,
 }
 
