@@ -1,6 +1,6 @@
 {
   "name": "@sebastienelet/arnes-linux-x64-gnu",
-  "version": "0.0.2",
+  "version": "0.0.3",
   "description": "Native arnes executable for linux-x64-gnu",
   "license": "BSD-3-Clause",
   "repository": {
