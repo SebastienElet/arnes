@@ -1,11 +1,12 @@
 import { test, expect } from "bun:test";
 import { join } from "node:path";
+import manifest from "../package.json";
 
 const launcher = join(import.meta.dir, "../bin/arnes.mjs");
 test("Bun wrapper invokes the native public command", () => {
   const result = Bun.spawnSync([process.execPath, launcher, "--version"]);
   expect(result.exitCode).toBe(0);
-  expect(result.stdout.toString()).toBe("arnes 0.0.1\n");
+  expect(result.stdout.toString()).toBe(`arnes ${manifest.version}\n`);
 });
 test("Bun wrapper preserves native argument failures", () => {
   const result = Bun.spawnSync([process.execPath, launcher, "--unknown-552-option"]);
@@ -14,15 +15,19 @@ test("Bun wrapper preserves native argument failures", () => {
 });
 
 test("missing optional native package is an explicit failure without fallback", async () => {
-  const { mkdtemp, copyFile, rm } = await import("node:fs/promises");
+  const { mkdtemp, mkdir, copyFile, rm } = await import("node:fs/promises");
   const { tmpdir } = await import("node:os");
   const directory = await mkdtemp(join(tmpdir(), "launcher-552-"));
   try {
-    const isolated = join(directory, "launcher.mjs");
+    const isolatedVersion = "0.0.0-test";
+    await Bun.write(join(directory, "package.json"), JSON.stringify({ version: isolatedVersion }));
+    await mkdir(join(directory, "bin"));
+    const isolated = join(directory, "bin/arnes.mjs");
     await copyFile(launcher, isolated);
     const result = Bun.spawnSync([process.execPath, "--no-install", isolated, "--version"]);
     expect(result.exitCode).toBe(1);
     expect(result.stderr.toString()).toContain("Missing @sebastienelet/");
+    expect(result.stderr.toString()).toContain(`@${isolatedVersion}; install optional dependencies with Bun`);
     expect(result.stdout.toString()).toBe("");
   } finally {
     await rm(directory, { recursive: true });

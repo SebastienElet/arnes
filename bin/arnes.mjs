@@ -1,6 +1,7 @@
 #!/usr/bin/env bun
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
+import packageManifest from "../package.json";
 
 const variants = { "darwin-arm64": "darwin-arm64", "linux-x64": "linux-x64-gnu" };
 const suffix = variants[`${process.platform}-${process.arch}`];
@@ -13,7 +14,7 @@ try {
   try {
     manifest = import.meta.resolve(`@sebastienelet/arnes-${suffix}/package.json`);
   } catch {
-    throw new Error(`Missing @sebastienelet/arnes-${suffix}@0.0.1; install optional dependencies with Bun`);
+    throw new Error(`Missing @sebastienelet/arnes-${suffix}@${packageManifest.version}; install optional dependencies with Bun`);
   }
   const executable = join(dirname(fileURLToPath(manifest)), "bin/arnes");
   const result = Bun.spawnSync([executable, ...process.argv.slice(2)], { stdin: "inherit", stdout: "inherit", stderr: "inherit" });
