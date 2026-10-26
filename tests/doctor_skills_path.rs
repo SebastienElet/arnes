@@ -75,19 +75,227 @@ fn bare_resource_tokens_use_skill_root_and_markdown_links_use_document_directory
 }
 
 #[test]
-fn explicit_relative_tokens_keep_the_document_directory_as_their_base() -> TestResult {
+fn generic_bare_paths_are_ignored_in_text_and_inline_code() -> TestResult {
     let directory = tempfile::tempdir()?;
     fs::create_dir_all(directory.path().join("skills/alpha/references"))?;
-    for (file, contents) in [
-        ("SKILL.md", "# Alpha\n"),
-        ("references/x.md", "`./guide.md` `../root-guide.md`\n"),
-        ("references/guide.md", "# Local guide\n"),
-        ("root-guide.md", "# Root guide\n"),
+    for mention in [
+        "scripts/",
+        "assets/",
+        "agents/",
+        "references/",
+        "evals/",
+        "references/<topic>-<scope>.md",
+        "references/{topic}.md",
+        "references/{topic}",
+        "scripts/*.sh",
+        "./<skills-root>/<slug>",
+        "./missing.md",
+        "../.agents/skills",
+        "../../outside/secret",
     ] {
-        fs::write(directory.path().join("skills/alpha").join(file), contents)?;
+        for file in ["SKILL.md", "references/guide.md"] {
+            fs::write(
+                directory.path().join("skills/alpha").join(file),
+                format!("# Alpha\n{mention}\n`{mention}`\n"),
+            )?;
+        }
+        let output = run(&directory, &["--format", "json"])?;
+        assert_eq!(output.status.code(), Some(0), "{mention}: {output:?}");
+        let diagnostics: serde_json::Value = serde_json::from_slice(&output.stdout)?;
+        let diagnostics = diagnostics.as_array().ok_or("expected diagnostics")?;
+        assert!(!diagnostics.is_empty());
+        assert!(
+            diagnostics.iter().all(|value| value["state"] == "healthy"),
+            "{mention}: {diagnostics:?}"
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn concrete_bare_resources_in_main_are_checked_without_resource_directories() -> TestResult {
+    let directory = tempfile::tempdir()?;
+    fs::create_dir_all(directory.path().join("skills/alpha"))?;
+    for mention in [
+        "references/github.md",
+        "scripts/run.sh",
+        "agents/openai.yaml",
+        "assets/icon.svg",
+        "evals/case.json",
+    ] {
+        fs::write(
+            directory.path().join("skills/alpha/SKILL.md"),
+            format!("# Alpha\n{mention}\n`{mention}`\n"),
+        )?;
+        let output = run(&directory, &["--format", "json"])?;
+        assert_eq!(output.status.code(), Some(1), "{mention}: {output:?}");
+        let diagnostics: serde_json::Value = serde_json::from_slice(&output.stdout)?;
+        let links = diagnostics
+            .as_array()
+            .ok_or("expected diagnostics")?
+            .iter()
+            .filter(|value| value["rule"] == "link")
+            .collect::<Vec<_>>();
+        assert_eq!(links.len(), 2, "{mention}: {diagnostics}");
+        for (link, line) in links.iter().zip([2, 3]) {
+            assert_eq!(link["state"], "drift");
+            assert_eq!(link["file"], "skills/alpha/SKILL.md");
+            assert_eq!(link["line"], line);
+            assert!(
+                link["message"]
+                    .as_str()
+                    .ok_or("missing message")?
+                    .contains(mention)
+            );
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn secondary_documents_check_bare_resources_only_when_the_directory_exists() -> TestResult {
+    let directory = tempfile::tempdir()?;
+    let skill = directory.path().join("skills/alpha");
+    fs::create_dir_all(skill.join("references"))?;
+    fs::write(skill.join("SKILL.md"), "# Alpha\n")?;
+    let mentions = "agents/openai.yaml\n`assets/icon.svg`\nevals/case.json\n`scripts/run.sh`\n";
+    fs::write(skill.join("references/guide.md"), mentions)?;
+    let output = run(&directory, &["--format", "json"])?;
+    assert_eq!(output.status.code(), Some(0), "{output:?}");
+    let diagnostics: serde_json::Value = serde_json::from_slice(&output.stdout)?;
+    assert!(
+        diagnostics
+            .as_array()
+            .ok_or("expected diagnostics")?
+            .iter()
+            .all(|value| value["state"] == "healthy"),
+        "{diagnostics}"
+    );
+    for resource in ["agents", "assets", "evals", "scripts"] {
+        fs::create_dir(skill.join(resource))?;
+    }
+    fs::write(
+        skill.join("references/guide.md"),
+        format!("{mentions}`references/missing.md`\n"),
+    )?;
+    let output = run(&directory, &["--format", "json"])?;
+    assert_eq!(output.status.code(), Some(1), "{output:?}");
+    let diagnostics: serde_json::Value = serde_json::from_slice(&output.stdout)?;
+    let links = diagnostics
+        .as_array()
+        .ok_or("expected diagnostics")?
+        .iter()
+        .filter(|value| value["rule"] == "link")
+        .collect::<Vec<_>>();
+    assert_eq!(links.len(), 5, "{diagnostics}");
+    for (link, line) in links.iter().zip(1..=5) {
+        assert_eq!(link["state"], "drift");
+        assert_eq!(link["file"], "skills/alpha/references/guide.md");
+        assert_eq!(link["line"], line);
+    }
+    for file in [
+        "agents/openai.yaml",
+        "assets/icon.svg",
+        "evals/case.json",
+        "scripts/run.sh",
+        "references/missing.md",
+    ] {
+        fs::write(skill.join(file), "")?;
     }
     let output = run(&directory, &["--format", "json"])?;
     assert_eq!(output.status.code(), Some(0), "{output:?}");
+    let diagnostics: serde_json::Value = serde_json::from_slice(&output.stdout)?;
+    assert!(
+        diagnostics
+            .as_array()
+            .ok_or("expected diagnostics")?
+            .iter()
+            .all(|value| value["state"] == "healthy"),
+        "{diagnostics}"
+    );
+    Ok(())
+}
+
+#[test]
+fn inline_code_link_examples_are_ignored_but_adjacent_links_are_checked() -> TestResult {
+    let directory = tempfile::tempdir()?;
+    fs::create_dir_all(directory.path().join("skills/alpha"))?;
+    for example in [
+        "`[<text>](<slug>)`",
+        "``[example](sample.md)``",
+        "`[outside](../../outside/secret)`",
+        "`[example]( references/missing.md )`",
+        "`` `[example](sample.md)` ``",
+        "`[example](\nreferences/missing.md\n)`",
+    ] {
+        fs::write(
+            directory.path().join("skills/alpha/SKILL.md"),
+            format!("# Alpha\n{example} [real](missing.md)\n"),
+        )?;
+        let output = run(&directory, &["--format", "json"])?;
+        assert_eq!(output.status.code(), Some(1), "{example}: {output:?}");
+        let diagnostics: serde_json::Value = serde_json::from_slice(&output.stdout)?;
+        let links = diagnostics
+            .as_array()
+            .ok_or("expected diagnostics")?
+            .iter()
+            .filter(|value| value["rule"] == "link")
+            .collect::<Vec<_>>();
+        assert_eq!(links.len(), 1, "{example}: {diagnostics}");
+        let link = links.first().ok_or("missing link")?;
+        assert_eq!(link["state"], "drift");
+        assert_eq!(link["line"], example.lines().count() + 1);
+        assert!(
+            link["message"]
+                .as_str()
+                .ok_or("missing message")?
+                .contains("missing.md is missing")
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn escaped_and_unmatched_backticks_do_not_hide_real_markdown_links() -> TestResult {
+    let directory = tempfile::tempdir()?;
+    fs::create_dir_all(directory.path().join("skills/alpha"))?;
+    fs::write(directory.path().join("skills/alpha/has`tick.md"), "")?;
+    for (contents, line) in [
+        (
+            "[existing](has`tick.md) [missing](missing.md) [outside](../../outside/secret) `\n",
+            2,
+        ),
+        (
+            "\\` [missing](missing.md) [outside](../../outside/secret) \\`\n",
+            2,
+        ),
+        (
+            "` example\n\n[missing](missing.md) [outside](../../outside/secret) `\n",
+            4,
+        ),
+        (
+            "` example\n \t\n[missing](missing.md) [outside](../../outside/secret) `\n",
+            4,
+        ),
+    ] {
+        fs::write(
+            directory.path().join("skills/alpha/SKILL.md"),
+            format!("# Alpha\n{contents}"),
+        )?;
+        let output = run(&directory, &["--format", "json"])?;
+        assert_eq!(output.status.code(), Some(2), "{contents}: {output:?}");
+        let diagnostics: serde_json::Value = serde_json::from_slice(&output.stdout)?;
+        let links = diagnostics
+            .as_array()
+            .ok_or("expected diagnostics")?
+            .iter()
+            .filter(|value| value["rule"] == "link")
+            .collect::<Vec<_>>();
+        assert_eq!(links.len(), 2, "{contents}: {diagnostics}");
+        assert!(links.iter().any(|link| link["state"] == "drift"));
+        assert!(links.iter().any(|link| link["state"] == "error"));
+        assert!(links.iter().all(|link| link["line"] == line));
+    }
     Ok(())
 }
 
@@ -104,8 +312,8 @@ fn markdown_targets_with_whitespace_are_not_reinterpreted_as_bare_tokens() -> Te
         "# Local guide\n",
     )?;
     for contents in [
-        "[guide]( references/guide.md )\n`assets/`\n",
-        "[guide](\nreferences/guide.md\n)\n`assets/`\n",
+        "[guide]( references/guide.md )\n[assets](../assets/)\n",
+        "[guide](\nreferences/guide.md\n)\n[assets](../assets/)\n",
     ] {
         fs::write(
             directory.path().join("skills/alpha/references/x.md"),
@@ -326,6 +534,14 @@ fn main_file_links_distinguish_missing_targets_from_escapes() -> TestResult {
         assert_eq!(link["state"], state);
         assert_eq!(link["file"], "skills/alpha/SKILL.md");
         assert_eq!(link["line"], 2);
+        if state == "error" {
+            assert!(
+                link["message"]
+                    .as_str()
+                    .ok_or("missing message")?
+                    .contains("escapes its skill")
+            );
+        }
         let human = run(&directory, &[])?;
         assert!(String::from_utf8(human.stdout)?.contains("skills/alpha/SKILL.md:2 link"));
     }

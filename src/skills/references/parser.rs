@@ -1,5 +1,5 @@
 use std::collections::BTreeSet;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 #[derive(Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub enum Reference {
@@ -66,10 +66,31 @@ fn markdown_targets(contents: &str) -> (Vec<(usize, String)>, String) {
     let mut token_contents = String::new();
     let mut text_start = 0;
     let mut search = 0;
-    while let Some(offset) = contents[search..].find("](") {
-        let start = search + offset + 2;
-        let Some((end, target)) = balanced_target(contents, start) else {
-            break;
+    let mut code_end = 0;
+    while let Some(offset) = contents[search..].find(['`', ']']) {
+        let marker = search + offset;
+        search = marker + 1;
+        if contents[marker..].starts_with('`') {
+            if marker >= code_end {
+                if escaped_backtick(contents, marker) {
+                    continue;
+                }
+                code_end = inline_code_end(contents, marker).unwrap_or(0);
+            }
+            search = marker + backtick_run(contents, marker);
+            continue;
+        }
+        if !contents[marker..].starts_with("](") {
+            continue;
+        }
+        let start = marker + 2;
+        let target_contents = if marker < code_end {
+            &contents[..code_end]
+        } else {
+            contents
+        };
+        let Some((end, target)) = balanced_target(target_contents, start) else {
+            continue;
         };
         let line = contents
             .get(..start)
@@ -78,7 +99,9 @@ fn markdown_targets(contents: &str) -> (Vec<(usize, String)>, String) {
             .filter(|byte| *byte == b'\n')
             .count()
             + 1;
-        targets.push((line, target));
+        if marker >= code_end {
+            targets.push((line, target));
+        }
         token_contents.push_str(contents.get(text_start..start).unwrap_or_default());
         token_contents.extend(contents.get(start..end).unwrap_or_default().chars().map(
             |character| {
@@ -90,6 +113,39 @@ fn markdown_targets(contents: &str) -> (Vec<(usize, String)>, String) {
     }
     token_contents.push_str(contents.get(text_start..).unwrap_or_default());
     (targets, token_contents)
+}
+
+fn escaped_backtick(contents: &str, start: usize) -> bool {
+    !contents[..start]
+        .bytes()
+        .rev()
+        .take_while(|byte| *byte == b'\\')
+        .count()
+        .is_multiple_of(2)
+}
+
+fn inline_code_end(contents: &str, start: usize) -> Option<usize> {
+    let length = backtick_run(contents, start);
+    let mut search = start + length;
+    while let Some(offset) = contents[search..].find('`') {
+        let end = search + offset;
+        let closing_length = backtick_run(contents, end);
+        search = end + closing_length;
+        if closing_length == length {
+            return (!contents[start..search]
+                .lines()
+                .any(|line| line.trim().is_empty()))
+            .then_some(search);
+        }
+    }
+    None
+}
+
+fn backtick_run(contents: &str, start: usize) -> usize {
+    contents[start..]
+        .bytes()
+        .take_while(|byte| *byte == b'`')
+        .count()
 }
 
 fn balanced_target(contents: &str, start: usize) -> Option<(usize, String)> {
@@ -127,7 +183,7 @@ fn markdown_candidate(value: &str) -> Option<PathBuf> {
 fn resource_tokens(contents: &str) -> impl Iterator<Item = &str> {
     contents
         .split_whitespace()
-        .filter(|token| !token.contains("]("))
+        .filter(|token| !token.contains("](") && !token.contains(['<', '>', '{', '}', '*']))
         .map(trim_token)
 }
 
@@ -144,14 +200,13 @@ fn trim_token(token: &str) -> &str {
 
 fn token_candidate(value: &str) -> Option<Reference> {
     let value = relative_candidate(value)?;
-    let explicit = value.starts_with("./") || value.starts_with("../");
+    if value.ends_with('/') {
+        return None;
+    }
     let resource = ["agents/", "assets/", "evals/", "references/", "scripts/"]
         .iter()
         .any(|prefix| value.starts_with(prefix));
-    if resource {
-        return Some(Reference::SkillRelative(Path::new(value).to_owned()));
-    }
-    explicit.then(|| Reference::DocumentRelative(Path::new(value).to_owned()))
+    resource.then(|| Reference::SkillRelative(PathBuf::from(value)))
 }
 
 fn relative_candidate(value: &str) -> Option<&str> {

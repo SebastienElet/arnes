@@ -43,7 +43,17 @@ pub fn diagnose_declared(skill: &Path, subject: &str, declared: &[PathBuf]) -> V
         for (line, reference) in local_references(&contents) {
             let (base, reference) = match &reference {
                 Reference::DocumentRelative(path) => (file.parent().unwrap_or(skill), path),
-                Reference::SkillRelative(path) => (skill, path),
+                Reference::SkillRelative(path) => {
+                    if file != main
+                        && !path
+                            .iter()
+                            .next()
+                            .is_some_and(|directory| skill.join(directory).is_dir())
+                    {
+                        continue;
+                    }
+                    (skill, path)
+                }
             };
             if let Err(diagnostic) = validate_reference(skill, base, reference, subject, declared) {
                 let measurement = diagnostic.message.clone();
