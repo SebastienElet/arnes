@@ -1,6 +1,6 @@
 use crate::Roots;
 use crate::files::includes::Resolver;
-use crate::files::paths::planned_within;
+use crate::files::paths::{planned_within, same_file};
 use crate::manifest::{Manifest, Scope};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -67,7 +67,10 @@ fn reservations(roots: &Roots, manifest: &Manifest) -> Result<Vec<PathBuf>, &'st
         for slug in manifest.installed_skills(projection.agent, projection.scope) {
             let source = root.join(manifest.skill_source(slug, projection.source));
             let collection = source.parent().ok_or("skill source has no collection")?;
-            reserve(&mut reserved, collection, root)?;
+            if !same_file(collection, root) {
+                reserve(&mut reserved, collection, root)?;
+            }
+            reserve(&mut reserved, &source, root)?;
         }
     }
     for prompt in manifest.prompts() {

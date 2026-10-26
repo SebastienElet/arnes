@@ -124,13 +124,17 @@ impl Manifest {
             .map(|skill| skill.slug.as_str())
     }
 
-    pub(crate) fn skill_source(&self, slug: &str, collection: &Path) -> PathBuf {
+    pub(crate) fn custom_skill_source(&self, slug: &str) -> Option<&Path> {
         self.0
             .skills
             .iter()
             .find(|skill| skill.slug == slug)
-            .and_then(|skill| skill.source.clone())
-            .unwrap_or_else(|| collection.join(slug))
+            .and_then(|skill| skill.source.as_deref())
+    }
+
+    pub(crate) fn skill_source(&self, slug: &str, collection: &Path) -> PathBuf {
+        self.custom_skill_source(slug)
+            .map_or_else(|| collection.join(slug), Path::to_path_buf)
     }
 
     pub(crate) fn skill_sources(&self, collection: &Path) -> impl Iterator<Item = PathBuf> {
