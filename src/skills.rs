@@ -4,6 +4,7 @@ use crate::manifest::{Agent, Manifest, Scope, SkillLayout, SkillProjection};
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
+mod checks;
 pub(crate) mod discovery;
 mod external;
 mod projection;
@@ -15,6 +16,67 @@ pub fn diagnose(
     manifest: &Manifest,
     agent: Option<Agent>,
     scope: Option<Scope>,
+) -> Vec<Diagnostic> {
+    diagnose_with_local(roots, manifest, agent, scope, false)
+}
+
+#[must_use]
+pub fn diagnose_local(
+    roots: &Roots,
+    manifest: &Manifest,
+    agent: Option<Agent>,
+    scope: Option<Scope>,
+) -> Vec<Diagnostic> {
+    diagnose_with_local(roots, manifest, agent, scope, true)
+}
+
+#[must_use]
+pub fn diagnose_path(directory: &Path, local: bool) -> Vec<Diagnostic> {
+    let names = match discovery::installations(directory) {
+        Ok(names) => names,
+        Err(reason) => {
+            return vec![checks::finding(
+                directory,
+                1,
+                "discovery",
+                reason,
+                State::Error,
+            )];
+        }
+    };
+    names
+        .into_iter()
+        .flat_map(|name| {
+            let skill = directory.join(name);
+            let file = skill.join("SKILL.md");
+            match std::fs::symlink_metadata(&file) {
+                Ok(_) => {}
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Vec::new(),
+                Err(_) => {
+                    return vec![checks::finding(
+                        &file,
+                        1,
+                        "discovery",
+                        "SKILL.md could not be inspected",
+                        State::Error,
+                    )];
+                }
+            }
+            let subject = format!("skill {}", skill.display());
+            let mut diagnostics = references::diagnose_declared(&skill, &subject, &[]);
+            diagnostics.extend(checks::diagnose(&skill, local));
+            diagnostics.extend(checks::dated_files(&skill, &subject));
+            diagnostics
+        })
+        .collect()
+}
+
+fn diagnose_with_local(
+    roots: &Roots,
+    manifest: &Manifest,
+    agent: Option<Agent>,
+    scope: Option<Scope>,
+    local: bool,
 ) -> Vec<Diagnostic> {
     let undeclared_agents = external::outside_manifest(roots, manifest, agent, scope);
     let combinations = manifest
@@ -34,7 +96,7 @@ pub fn diagnose(
     combinations
         .into_iter()
         .flat_map(|(agent, scope)| {
-            diagnose_one(roots, manifest, agent, scope)
+            diagnose_one(roots, manifest, agent, scope, local)
                 .into_iter()
                 .map(move |diagnostic| diagnostic.with_human_section(section(agent, scope)))
         })
@@ -46,7 +108,13 @@ fn section(agent: Agent, scope: Scope) -> HumanSection {
     HumanSection::new(format!("{agent}:{scope}"), agent.to_string().to_uppercase())
 }
 
-fn diagnose_one(roots: &Roots, manifest: &Manifest, agent: Agent, scope: Scope) -> Vec<Diagnostic> {
+fn diagnose_one(
+    roots: &Roots,
+    manifest: &Manifest,
+    agent: Agent,
+    scope: Scope,
+    local: bool,
+) -> Vec<Diagnostic> {
     let resources = manifest
         .skill_projections()
         .filter(|resource| resource.agent == agent && resource.scope == scope)
@@ -64,8 +132,12 @@ fn diagnose_one(roots: &Roots, manifest: &Manifest, agent: Agent, scope: Scope) 
         .collect::<Vec<_>>();
     for resource in supported {
         match resource.layout {
-            SkillLayout::Leaves => diagnostics.extend(diagnose_leaves(roots, manifest, &resource)),
-            SkillLayout::Root => diagnostics.extend(diagnose_root(roots, manifest, &resource)),
+            SkillLayout::Leaves => {
+                diagnostics.extend(diagnose_leaves(roots, manifest, &resource, local));
+            }
+            SkillLayout::Root => {
+                diagnostics.extend(diagnose_root(roots, manifest, &resource, local));
+            }
         }
     }
     diagnostics.extend(external::diagnose(roots, manifest, agent, scope));
@@ -76,6 +148,7 @@ fn diagnose_leaves(
     roots: &Roots,
     manifest: &Manifest,
     resource: &SkillProjection<'_>,
+    local: bool,
 ) -> Vec<Diagnostic> {
     let skills = manifest
         .installed_skills(resource.agent, resource.scope)
@@ -86,7 +159,7 @@ fn diagnose_leaves(
         .collect::<HashSet<PathBuf>>();
     let mut diagnostics = skills
         .iter()
-        .map(|skill| projection::leaf(roots, manifest, resource, skill))
+        .flat_map(|skill| projection::leaf(roots, manifest, resource, skill, local))
         .collect::<Vec<_>>();
     diagnostics.extend(discovery::unmanaged(
         roots,
@@ -103,8 +176,9 @@ fn diagnose_root(
     roots: &Roots,
     manifest: &Manifest,
     resource: &SkillProjection<'_>,
+    local: bool,
 ) -> Vec<Diagnostic> {
-    let (diagnostics, skills) = match projection::root(roots, resource) {
+    let (diagnostics, skills) = match projection::root(roots, resource, local) {
         Ok(result) => result,
         Err(diagnostic) => return vec![diagnostic],
     };

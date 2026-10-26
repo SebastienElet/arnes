@@ -12,7 +12,8 @@ pub fn leaf(
     manifest: &Manifest,
     resource: &SkillProjection<'_>,
     name: &str,
-) -> Diagnostic {
+    local: bool,
+) -> Vec<Diagnostic> {
     let installed = resource.destination.join(name);
     let subject = format!(
         "managed {} {} skill {name} at {}",
@@ -33,7 +34,7 @@ pub fn leaf(
         .collect::<Vec<_>>();
     let destination = destination(roots, resource.scope, &installed);
     let human = ProjectionHuman::new(name, label(resource.scope, &installed));
-    match expected_link(
+    if let Err(diagnostic) = expected_link(
         roots,
         resource.scope,
         source_root,
@@ -41,18 +42,16 @@ pub fn leaf(
         &destination,
         &subject,
         &human,
-    )
-    .and_then(|()| references::validate_declared(&destination, &subject, &declared))
-    {
-        Ok(()) => Diagnostic::new("skills", State::Healthy, format!("{subject} is current"))
-            .with_human_summary(name),
-        Err(diagnostic) => diagnostic,
+    ) {
+        return vec![diagnostic];
     }
+    contents(&destination, &subject, &declared, name, local)
 }
 
 pub fn root(
     roots: &Roots,
     resource: &SkillProjection<'_>,
+    local: bool,
 ) -> Result<(Vec<Diagnostic>, Vec<PathBuf>), Diagnostic> {
     let source = roots.repository().join(resource.source);
     let destination = destination(roots, resource.scope, resource.destination);
@@ -79,7 +78,7 @@ pub fn root(
         .map_err(|reason| broken(&subject, State::Error, &reason))?;
     let diagnostics = skills
         .iter()
-        .map(|name| root_skill(roots, resource, &source, &destination, name))
+        .flat_map(|name| root_skill(roots, resource, &source, &destination, name, local))
         .collect();
     Ok((diagnostics, skills))
 }
@@ -90,7 +89,8 @@ fn root_skill(
     source: &Path,
     destination: &Path,
     name: &Path,
-) -> Diagnostic {
+    local: bool,
+) -> Vec<Diagnostic> {
     let source = source.join(name);
     let installed = destination.join(name);
     let subject = format!(
@@ -102,13 +102,39 @@ fn root_skill(
         name.display()
     );
     let result = source_directory(&source, roots.repository(), &subject)
-        .and_then(|expected| same_target(&installed, &expected, &subject))
-        .and_then(|()| references::validate(&installed, &subject));
-    match result {
-        Ok(()) => Diagnostic::new("skills", State::Healthy, format!("{subject} is current"))
-            .with_human_summary(name.display().to_string()),
-        Err(diagnostic) => diagnostic,
+        .and_then(|expected| same_target(&installed, &expected, &subject));
+    if let Err(diagnostic) = result {
+        return vec![diagnostic];
     }
+    contents(
+        &installed,
+        &subject,
+        &[],
+        &name.display().to_string(),
+        local,
+    )
+}
+
+fn contents(
+    skill: &Path,
+    subject: &str,
+    declared: &[PathBuf],
+    name: &str,
+    local: bool,
+) -> Vec<Diagnostic> {
+    let mut diagnostics = references::diagnose_declared(skill, subject, declared);
+    diagnostics.extend(
+        super::checks::diagnose(skill, local)
+            .into_iter()
+            .filter(|diagnostic| diagnostic.state != State::Healthy),
+    );
+    if diagnostics.is_empty() {
+        diagnostics.push(
+            Diagnostic::new("skills", State::Healthy, format!("{subject} is current"))
+                .with_human_summary(name),
+        );
+    }
+    diagnostics
 }
 
 struct ProjectionHuman {

@@ -1,4 +1,4 @@
-use crate::cli::{Color, Format, Resource, validate_render_options};
+use crate::cli::{DoctorArgs, Format, Resource, validate_render_options};
 use crate::cli_output::write_output;
 use arnes::Roots;
 use arnes::commands;
@@ -17,20 +17,32 @@ use std::process::ExitCode;
 
 mod render;
 
-pub fn run(
-    resource: Option<Resource>,
-    agent: Option<Agent>,
-    scope: Option<Scope>,
-    format: Format,
-    color: Color,
-    verbose: bool,
-) -> ExitCode {
+pub fn run(args: DoctorArgs) -> ExitCode {
+    let DoctorArgs {
+        resource,
+        agent,
+        scope,
+        format,
+        color,
+        verbose,
+        path,
+        local,
+    } = args;
     if let Err(error) = validate_render_options(format, verbose, color) {
         let _ = crate::cli_output::write_error(format_args!("{error}"));
         return ExitCode::from(2);
     }
 
-    let diagnostics = diagnose(resource, agent, scope);
+    if (path.is_some() || local) && resource != Some(Resource::Skills) {
+        let _ = crate::cli_output::write_error(format_args!(
+            "--path and --local require doctor skills"
+        ));
+        return ExitCode::from(2);
+    }
+    let diagnostics = path.as_deref().map_or_else(
+        || diagnose(resource, agent, scope, local),
+        |path| skills::diagnose_path(path, local),
+    );
     let human_options = (if verbose {
         HumanOptions::verbose()
     } else {
@@ -45,9 +57,12 @@ pub fn run(
         Some(Resource::Statusline) => scope,
         _ => resource.and_then(|_| scope.or(Some(Scope::User))).or(scope),
     };
-    let (output, exit_code) = match format {
-        Format::Human => render::human(diagnostics, resource, agent, rendered_scope, human_options),
-        Format::Json => {
+    let (output, exit_code) = match (format, path.as_deref()) {
+        (Format::Human, Some(path)) => render::repository(diagnostics, path, human_options),
+        (Format::Human, None) => {
+            render::human(diagnostics, resource, agent, rendered_scope, human_options)
+        }
+        (Format::Json, _) => {
             let report = Report::new(diagnostics);
             (
                 match report.json() {
@@ -76,6 +91,7 @@ fn diagnose(
     resource: Option<Resource>,
     agent: Option<Agent>,
     scope: Option<Scope>,
+    local: bool,
 ) -> Vec<Diagnostic> {
     match resource {
         None => diagnose_default(agent, scope),
@@ -96,7 +112,7 @@ fn diagnose(
             )],
         },
         Some(Resource::Skills) => match Roots::from_environment() {
-            Ok(roots) => diagnose_skills(&roots, agent, scope.or(Some(Scope::User))),
+            Ok(roots) => diagnose_skills(&roots, agent, scope.or(Some(Scope::User)), local),
             Err(error) => vec![Diagnostic::new("skills", State::Error, error.to_string())],
         },
         Some(Resource::Prompts) => match Roots::from_environment() {
@@ -186,8 +202,14 @@ fn diagnose_instructions(
     }
 }
 
-fn diagnose_skills(roots: &Roots, agent: Option<Agent>, scope: Option<Scope>) -> Vec<Diagnostic> {
+fn diagnose_skills(
+    roots: &Roots,
+    agent: Option<Agent>,
+    scope: Option<Scope>,
+    local: bool,
+) -> Vec<Diagnostic> {
     match manifest::load(roots.home()) {
+        Ok(manifest) if local => skills::diagnose_local(roots, &manifest, agent, scope),
         Ok(manifest) => skills::diagnose(roots, &manifest, agent, scope),
         Err(error) => vec![Diagnostic::new("skills", State::Error, error.to_string())],
     }

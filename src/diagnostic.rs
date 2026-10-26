@@ -9,6 +9,7 @@ pub use human::{ColorMode, HumanContext, HumanOptions};
 #[serde(rename_all = "lowercase")]
 pub enum State {
     Healthy,
+    Warning,
     Drift,
     Unsupported,
     Error,
@@ -18,6 +19,7 @@ impl Display for State {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter.write_str(match self {
             Self::Healthy => "healthy",
+            Self::Warning => "warning",
             Self::Drift => "drift",
             Self::Unsupported => "unsupported",
             Self::Error => "error",
@@ -34,6 +36,18 @@ pub struct Diagnostic {
     human: Option<Box<HumanDiagnostic>>,
     #[serde(skip)]
     section: Option<Box<HumanSection>>,
+    #[serde(flatten, skip_serializing_if = "Option::is_none")]
+    finding: Option<Box<Finding>>,
+}
+
+#[derive(Debug, Eq, PartialEq, Serialize)]
+struct Finding {
+    file: std::path::PathBuf,
+    line: usize,
+    rule: &'static str,
+    measurement: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    tokenizer: Option<&'static str>,
 }
 
 #[derive(Debug, Eq, PartialEq)]
@@ -111,7 +125,33 @@ impl Diagnostic {
             message: message.into(),
             human: None,
             section: None,
+            finding: None,
         }
+    }
+
+    #[must_use]
+    pub(crate) fn with_finding(
+        mut self,
+        file: &std::path::Path,
+        line: usize,
+        rule: &'static str,
+        measurement: impl Into<String>,
+        tokenizer: Option<&'static str>,
+    ) -> Self {
+        let measurement = measurement.into();
+        self = self.with_human_summary(format!(
+            "{}:{line} {rule} {measurement}{}",
+            file.display(),
+            tokenizer.map_or_else(String::new, |name| format!(" {name}"))
+        ));
+        self.finding = Some(Box::new(Finding {
+            file: file.to_path_buf(),
+            line,
+            rule,
+            measurement,
+            tokenizer,
+        }));
+        self
     }
 
     #[must_use]
@@ -212,7 +252,7 @@ impl Report {
             .map(|diagnostic| match diagnostic.state {
                 State::Error => 2,
                 State::Drift => 1,
-                State::Healthy | State::Unsupported => 0,
+                State::Healthy | State::Unsupported | State::Warning => 0,
             })
             .max()
             .unwrap_or(0)

@@ -156,9 +156,9 @@ fn agent_and_scope_filters_isolate_skill_projections()
         1
     );
     assert!(
-        stdout
-            .lines()
-            .any(|line| line.contains("DRIFT broken managed cursor project skill beta")),
+        stdout.lines().any(|line| line.contains("DRIFT ")
+            && line.contains("broken managed cursor project skill beta")
+            && line.contains("SKILL.md:2 link")),
         "{stdout}"
     );
     assert!(!stdout.lines().any(|line| line.contains("HEALTHY alpha")));

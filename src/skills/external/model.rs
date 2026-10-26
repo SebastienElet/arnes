@@ -119,7 +119,7 @@ fn plugin_diagnostic(agent: Agent, scope: Scope, plugin: &Plugin, allowed: bool)
         match state(plugin.topology, plugin.exposure, allowed) {
             State::Error => State::Error,
             _ if !allowed => State::Drift,
-            state @ (State::Healthy | State::Drift | State::Unsupported) => state,
+            state @ (State::Healthy | State::Drift | State::Unsupported | State::Warning) => state,
         },
         format!(
             "external {agent} {scope} plugin {} origin=plugin ownership=external version={}{} exposure={} topology={} policy={} activation={} path={}{}{removal}",

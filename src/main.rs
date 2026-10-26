@@ -17,14 +17,7 @@ fn main() -> ExitCode {
     match command {
         Command::Sync(args) => sync_cli::run(args),
         Command::Export { check, sources } => run_export(check, sources.as_deref()),
-        Command::Doctor {
-            resource,
-            agent,
-            scope,
-            format,
-            color,
-            verbose,
-        } => doctor::run(resource, agent, scope, format, color, verbose),
+        Command::Doctor(args) => doctor::run(args),
         Command::Setup { command } => run_setup(command),
     }
 }

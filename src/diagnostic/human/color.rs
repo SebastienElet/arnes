@@ -36,7 +36,7 @@ impl Colorizer {
         let code = match state {
             State::Error => 31,
             State::Healthy => 32,
-            State::Drift => 33,
+            State::Drift | State::Warning => 33,
             State::Unsupported => 36,
         };
         format!("\x1b[{code}m{value}\x1b[0m")
