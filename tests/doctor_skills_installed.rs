@@ -27,6 +27,51 @@ fn local_preserves_the_same_agent_and_scope_filters_as_default_doctor() -> TestR
 }
 
 #[test]
+fn installed_skills_ignore_generic_paths_but_keep_concrete_missing_references() -> TestResult {
+    let fixture = configured_fixture()?;
+    fixture.write_repository(
+        "harness/skills/alpha/SKILL.md",
+        "# Alpha\nscripts/ `assets/` evals/ `agents/` references/\nreferences/<topic>-<scope>.md `scripts/{name}.sh` assets/*\n./<skills-root>/<slug> `../.agents/skills` ../../outside/secret\n`[<text>](<slug>)`\n",
+    )?;
+    fixture.write_repository(
+        "harness/skills/alpha/references/guide.md",
+        "agents/openai.yaml `assets/icon.svg` evals/case.json `scripts/run.sh`\n",
+    )?;
+    for (contents, code, state) in [
+        (None, 0, "healthy"),
+        (Some("`references/github.md`\n"), 1, "drift"),
+        (Some("[missing](references/absent.md)\n"), 1, "drift"),
+    ] {
+        if let Some(contents) = contents {
+            fixture.write_repository("harness/skills/alpha/SKILL.md", contents)?;
+        }
+        let (actual, stdout, _) = run(
+            &fixture,
+            &["doctor", "skills", "--agent", "claude", "--format", "json"],
+        )?;
+        assert_eq!(actual, code, "{stdout}");
+        let diagnostics: serde_json::Value = serde_json::from_str(&stdout)?;
+        let diagnostics = diagnostics.as_array().ok_or("expected diagnostics")?;
+        assert!(
+            diagnostics.iter().any(|value| value["state"] == state),
+            "{stdout}"
+        );
+        assert!(
+            diagnostics
+                .iter()
+                .all(|value| value["state"] == "healthy" || value["state"] == state),
+            "{stdout}"
+        );
+        let link_count = diagnostics
+            .iter()
+            .filter(|value| value["rule"] == "link")
+            .count();
+        assert_eq!(link_count, usize::from(code != 0), "{stdout}");
+    }
+    Ok(())
+}
+
+#[test]
 fn installed_skills_apply_budget_and_requires_but_allow_dated_files() -> TestResult {
     let fixture = configured_fixture()?;
     fixture.write_repository(
