@@ -5,17 +5,17 @@
     "": {
       "name": "@sebastienelet/arnes",
       "optionalDependencies": {
-        "@sebastienelet/arnes-darwin-arm64": "0.0.1",
-        "@sebastienelet/arnes-linux-x64-gnu": "0.0.1",
+        "@sebastienelet/arnes-darwin-arm64": "0.0.2",
+        "@sebastienelet/arnes-linux-x64-gnu": "0.0.2",
       },
     },
     "packages/darwin-arm64": {
       "name": "@sebastienelet/arnes-darwin-arm64",
-      "version": "0.0.1",
+      "version": "0.0.2",
     },
     "packages/linux-x64-gnu": {
       "name": "@sebastienelet/arnes-linux-x64-gnu",
-      "version": "0.0.1",
+      "version": "0.0.2",
     },
   },
   "packages": {

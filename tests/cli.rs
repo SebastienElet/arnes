@@ -52,7 +52,10 @@ fn help_lists_doctor_resources() -> Result<(), Box<dyn std::error::Error + Send 
 fn version_succeeds() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let output = run(&["--version"])?;
     assert_eq!(output.status.code(), Some(0));
-    assert_eq!(String::from_utf8(output.stdout)?, "arnes 0.0.1\n");
+    assert_eq!(
+        String::from_utf8(output.stdout)?,
+        concat!("arnes ", env!("CARGO_PKG_VERSION"), "\n")
+    );
     assert_eq!(output.stderr, [] as [u8; 0]);
     Ok(())
 }
