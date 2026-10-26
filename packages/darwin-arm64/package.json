@@ -1,6 +1,6 @@
 {
   "name": "@sebastienelet/arnes-darwin-arm64",
-  "version": "0.0.2",
+  "version": "0.0.3",
   "description": "Native arnes executable for darwin-arm64",
   "license": "BSD-3-Clause",
   "repository": {

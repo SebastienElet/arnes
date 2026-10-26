@@ -1,7 +1,7 @@
 # Arnes
 
 Configuration, diagnostics, synchronization and export for Claude, Codex and Cursor.
-Prepared locally for `@sebastienelet/arnes@0.0.2`; no registry release is qualified yet.
+Prepared locally for `@sebastienelet/arnes@0.0.3`; no registry release is qualified yet.
 
 | Capability | Owner / public command |
 | --- | --- |
