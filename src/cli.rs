@@ -3,6 +3,7 @@ use arnes::hooks::SetupHooksArgs;
 use arnes::manifest::{Agent, Scope};
 use clap::{Parser, Subcommand, ValueEnum};
 
+// CI measurement probe; do not merge.
 #[derive(Parser)]
 #[command(version, about = "Diagnose agent harness resources")]
 pub struct Cli {
