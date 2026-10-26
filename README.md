@@ -43,3 +43,4 @@ Native packages carry executable SHA-256 and source revision in `BUILD.json`.
 The manual publish workflow requires configured npm trusted publishers (OIDC) for all
 three packages and runs `npm publish --provenance` only in CI. Publish native variants
 before the entry package. Inspect registry state before resuming a partial publication.
+CI measurement probe; do not merge.
