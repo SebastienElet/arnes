@@ -1,19 +1,11 @@
-use crate::Roots;
-use crate::manifest::{self, Agent, HookKind, Scope};
-use clap::Args;
-use serde_json::json;
+use crate::manifest::Agent;
 use std::fmt::{self, Display};
 use std::fs;
-use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 
 mod adapters;
 mod inspect;
-pub(crate) mod io;
 mod json_value;
-mod ownership;
-mod reconcile;
-mod retired_remem;
 mod validate;
 
 const OUTPUT_DISCIPLINE: MatchedHandler = MatchedHandler {
@@ -28,172 +20,12 @@ const SEMCTX_NUDGE: MatchedHandler = MatchedHandler {
 };
 const FORMAT_EDITED_FILE_EVENT: &str = "PostToolUse";
 const FORMAT_EDITED_FILE_TIMEOUT_SECONDS: u64 = 30;
-const MEMORY_HOOK_TIMEOUT_SECONDS: u64 = 30;
 pub use inspect::diagnose;
 
 pub struct MatchedHandler {
     pub event: &'static str,
     pub matcher: &'static str,
     pub timeout_seconds: u64,
-}
-
-#[derive(Args, Clone, Copy)]
-pub struct SetupHooksArgs {
-    #[arg(long, value_enum)]
-    pub agent: Agent,
-    #[arg(long, value_enum, default_value = "user")]
-    pub scope: Scope,
-}
-
-/// # Errors
-/// Returns errors resolving installation roots, validating hook configuration, or reconciling managed hook files.
-pub fn setup(args: SetupHooksArgs) -> Result<(), HooksError> {
-    if args.scope != Scope::User {
-        return Err(HooksError::new("hooks only support the user scope"));
-    }
-    let roots = Roots::from_environment().map_err(HooksError::from_display)?;
-    let manifest = manifest::load(roots.home()).map_err(HooksError::from_display)?;
-    if !manifest
-        .combinations()
-        .any(|combination| combination == (args.agent, args.scope))
-    {
-        return Err(HooksError::new(format!(
-            "{} agent is not declared for {} scope",
-            args.agent, args.scope
-        )));
-    }
-    let desired: Vec<HookKind> = manifest.hooks(args.agent, args.scope).collect();
-    let policy = adapters::policy(args.agent);
-    refuse_manifest_target(&roots, policy.directory, policy.filename)?;
-    let measurement_path = measurement_path(roots.home());
-    let handoff_path = handoff_path(roots.home());
-    let memory_path = memory_path(roots.home());
-    let measurement = measurement_command(&measurement_path, args.agent)?;
-    let handoff_aliases = handoff_aliases(&handoff_path, roots.repository(), args.agent)?;
-    let memory = memory_command(&memory_path, args.agent)?;
-    let memory_event = policy.memory_event;
-    let output_path = roots.home().join(".local/bin/output-discipline-hook");
-    let output_discipline = output_discipline_command(&output_path)?;
-    if desired.contains(&HookKind::Memory) && (memory.is_none() || memory_event.is_none()) {
-        return Err(HooksError::new("Cursor does not support the memory hook"));
-    }
-    let file = io::ConfigFile::open(roots.home(), policy.directory, policy.filename)?;
-    let mut config = file
-        .content()
-        .map(json_value::parse)
-        .transpose()?
-        .unwrap_or_else(|| json!({}));
-    validate::configuration(&config, args.agent)?;
-    retired_remem::remove(&mut config, args.agent, roots.home())?;
-    ownership::remove_everywhere(&mut config, args.agent, &measurement)?;
-    let legacy = format!(
-        "{} measure hook --agent {}",
-        quoted_command(&roots.home().join(".local/bin/arnes"))?,
-        measurement_agent(args.agent)
-    );
-    ownership::remove_everywhere(&mut config, args.agent, &legacy)?;
-    if let Some(command) = &memory {
-        ownership::remove_everywhere(&mut config, args.agent, command)?;
-    }
-    ownership::remove_everywhere(&mut config, args.agent, &output_discipline)?;
-    if desired.contains(&HookKind::OutputDiscipline) {
-        validate_command(&output_path)?;
-        reconcile::matched_handler(&mut config, &OUTPUT_DISCIPLINE, &output_discipline)?;
-    }
-    if desired.contains(&HookKind::Measurement) {
-        validate_command(&measurement_path)?;
-        reconcile::measurement(
-            &mut config,
-            policy.events,
-            policy.nested,
-            policy.excluded,
-            &measurement,
-        )?;
-    }
-    if desired.contains(&HookKind::Memory) {
-        let Some(memory) = memory else {
-            return Err(HooksError::new("Cursor does not support the memory hook"));
-        };
-        let Some(memory_event) = memory_event else {
-            return Err(HooksError::new("Cursor does not support the memory hook"));
-        };
-        validate_command(&memory_path)?;
-        reconcile::memory(
-            &mut config,
-            memory_event,
-            &memory,
-            MEMORY_HOOK_TIMEOUT_SECONDS,
-        )?;
-    }
-    reconcile_format_edited_file(&mut config, &roots, args.agent, &desired)?;
-    reconcile_semctx_nudge(&mut config, &roots, args.agent, &desired)?;
-    if desired.contains(&HookKind::Handoff) {
-        validate_command(&handoff_path)?;
-        reconcile::handoff(
-            &mut config,
-            &handoff_aliases,
-            policy.handoff_args,
-            policy.handoff_execution_fields,
-        )?;
-    } else {
-        for command in &handoff_aliases {
-            ownership::remove_everywhere(&mut config, args.agent, command)?;
-        }
-    }
-    file.replace(&serde_json::to_vec_pretty(&config)?)
-}
-
-fn refuse_manifest_target(
-    roots: &Roots,
-    directory: &str,
-    filename: &str,
-) -> Result<(), HooksError> {
-    let source = manifest::path(roots.home()).map_err(HooksError::from_display)?;
-    let source = source.canonicalize().map_err(HooksError::from_display)?;
-    let target = roots.home().join(directory).join(filename);
-    if target.canonicalize().is_ok_and(|target| target == source) {
-        return Err(HooksError::new(
-            "hook configuration aliases the canonical manifest",
-        ));
-    }
-    Ok(())
-}
-
-fn reconcile_format_edited_file(
-    config: &mut serde_json::Value,
-    roots: &Roots,
-    agent: Agent,
-    desired: &[HookKind],
-) -> Result<(), HooksError> {
-    let path = format_edited_file_path(roots.deployment_repository());
-    let command = quoted_command(&path)?;
-    ownership::remove_everywhere(config, agent, &command)?;
-    if !desired.contains(&HookKind::FormatEditedFile) {
-        return Ok(());
-    }
-    let settings = format_edited_file_handler(agent)?;
-    validate_command(&path)?;
-    reconcile::matched_handler(config, &settings, &command)
-}
-
-fn reconcile_semctx_nudge(
-    config: &mut serde_json::Value,
-    roots: &Roots,
-    agent: Agent,
-    desired: &[HookKind],
-) -> Result<(), HooksError> {
-    if agent == Agent::Cursor {
-        return Ok(());
-    }
-    let path = semctx_nudge_path(roots.deployment_repository());
-    let command = semctx_nudge_command(&path, agent)?;
-    ownership::remove_everywhere(config, agent, &unquoted_semctx_nudge_command(&path, agent)?)?;
-    ownership::remove_everywhere(config, agent, &command)?;
-    if !desired.contains(&HookKind::SemctxNudge) {
-        return Ok(());
-    }
-    validate_command(&path)?;
-    reconcile::matched_handler(config, &SEMCTX_NUDGE, &command)
 }
 
 fn semctx_nudge_path(repository: &Path) -> PathBuf {
@@ -228,21 +60,6 @@ fn unquoted_semctx_nudge_command(path: &Path, agent: Agent) -> Result<String, Ho
 
 fn format_edited_file_path(repository: &Path) -> PathBuf {
     repository.join("tooling/format-edited-file")
-}
-
-pub(crate) fn source_paths(roots: &Roots, manifest: &manifest::Manifest) -> Vec<PathBuf> {
-    manifest
-        .combinations()
-        .flat_map(|(agent, scope)| manifest.hooks(agent, scope))
-        .map(|kind| match kind {
-            HookKind::Measurement => measurement_path(roots.home()),
-            HookKind::OutputDiscipline => roots.home().join(".local/bin/output-discipline-hook"),
-            HookKind::Memory => memory_path(roots.home()),
-            HookKind::Handoff => handoff_path(roots.home()),
-            HookKind::FormatEditedFile => format_edited_file_path(roots.deployment_repository()),
-            HookKind::SemctxNudge => semctx_nudge_path(roots.deployment_repository()),
-        })
-        .collect()
 }
 
 fn format_edited_file_handler(agent: Agent) -> Result<MatchedHandler, HooksError> {
@@ -307,18 +124,6 @@ fn handoff_aliases(
     Ok(aliases)
 }
 
-fn validate_command(command: &Path) -> Result<(), HooksError> {
-    let metadata = command
-        .metadata()
-        .map_err(|error| HooksError::new(format!("hook command is unavailable: {error}")))?;
-    if !command.is_absolute() || !metadata.is_file() || metadata.permissions().mode() & 0o111 == 0 {
-        return Err(HooksError::new(
-            "hook command must be an existing executable absolute file",
-        ));
-    }
-    Ok(())
-}
-
 const fn measurement_agent(agent: Agent) -> &'static str {
     match agent {
         Agent::Claude => "claude-code",
@@ -366,10 +171,6 @@ impl HooksError {
     fn new(message: impl Into<String>) -> Self {
         Self(message.into())
     }
-
-    fn from_display(error: impl Display) -> Self {
-        Self(error.to_string())
-    }
 }
 
 impl Display for HooksError {
@@ -383,12 +184,6 @@ impl std::error::Error for HooksError {}
 impl From<std::io::Error> for HooksError {
     fn from(error: std::io::Error) -> Self {
         Self(error.to_string())
-    }
-}
-
-impl From<rustix::io::Errno> for HooksError {
-    fn from(error: rustix::io::Errno) -> Self {
-        std::io::Error::from(error).into()
     }
 }
 

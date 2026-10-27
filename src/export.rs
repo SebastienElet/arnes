@@ -60,17 +60,6 @@ pub fn run(roots: &Roots, check: bool, selection: Option<&Path>) -> Result<(), E
 
 fn current_metadata(repository: &Path) -> Result<Metadata, ExportError> {
     let commit = current_commit(repository)?;
-    let status = run_git(
-        repository,
-        &[
-            "status",
-            "--porcelain=v1",
-            "--untracked-files=normal",
-            "--",
-            ".",
-            ":(exclude).harness-export",
-        ],
-    )?;
     let generated_at = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_err(|_| ExportError::new("system clock is before the Unix epoch"))?
@@ -78,14 +67,13 @@ fn current_metadata(repository: &Path) -> Result<Metadata, ExportError> {
     Ok(Metadata {
         commit,
         generated_at,
-        repository_state: if status.is_empty() { "clean" } else { "dirty" }.to_owned(),
+        repository_state: "not-inspected".to_owned(),
     })
 }
 
 fn current_commit(repository: &Path) -> Result<String, ExportError> {
-    let output = Command::new("git")
+    let output = git_inspection(repository)
         .args(["rev-parse", "--verify", "HEAD"])
-        .current_dir(repository)
         .output()
         .map_err(|error| ExportError::new(format!("Git could not run: {error}")))?;
     if !output.status.success() {
@@ -102,9 +90,8 @@ fn current_commit(repository: &Path) -> Result<String, ExportError> {
 }
 
 pub(super) fn run_git(repository: &Path, arguments: &[&str]) -> Result<Vec<u8>, ExportError> {
-    let output = Command::new("git")
+    let output = git_inspection(repository)
         .args(arguments)
-        .current_dir(repository)
         .output()
         .map_err(|error| ExportError::new(format!("Git could not run: {error}")))?;
     if !output.status.success() {
@@ -116,6 +103,24 @@ pub(super) fn run_git(repository: &Path, arguments: &[&str]) -> Result<Vec<u8>, 
         }));
     }
     Ok(output.stdout)
+}
+
+pub(super) fn git_inspection(repository: &Path) -> Command {
+    let mut command = Command::new("git");
+    command
+        .env_clear()
+        .args(["-c", "core.fsmonitor=false"])
+        .env("GIT_OPTIONAL_LOCKS", "0")
+        .env("GIT_TRACE2", "0")
+        .env("GIT_TRACE2_EVENT", "0")
+        .env("GIT_TRACE2_PERF", "0")
+        .current_dir(repository);
+    for name in ["PATH", "HOME", "XDG_CONFIG_HOME"] {
+        if let Some(value) = std::env::var_os(name) {
+            command.env(name, value);
+        }
+    }
+    command
 }
 
 fn sha256(contents: &str) -> String {

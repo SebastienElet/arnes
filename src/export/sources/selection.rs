@@ -1,5 +1,6 @@
+use super::super::git_inspection;
 use super::{Category, ExportError, decode_git_paths, reject_sensitive_path};
-use std::{collections::BTreeMap, fs, path::Path, process::Command};
+use std::{collections::BTreeMap, fs, path::Path};
 
 pub(super) fn read(
     repository: &Path,
@@ -24,9 +25,7 @@ pub(super) fn read(
             ));
         }
         reject_sensitive_path(path)?;
-        let output = Command::new("git")
-            .arg("-C")
-            .arg(repository)
+        let output = git_inspection(repository)
             .args(["check-ignore", "--quiet", "--", path])
             .output()
             .map_err(|error| ExportError::new(error.to_string()))?;

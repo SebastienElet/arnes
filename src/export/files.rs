@@ -1,6 +1,9 @@
 use super::ExportError;
+use rustix::fs::{AtFlags, Dir, Mode, OFlags};
 use std::collections::{BTreeMap, BTreeSet};
-use std::fs;
+use std::ffi::CString;
+use std::fs::{self, File};
+use std::io::{self, Write};
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -86,71 +89,100 @@ pub(super) fn publish_snapshot(
     output: &Path,
     snapshot: &BTreeMap<String, String>,
 ) -> Result<(), ExportError> {
-    if output.exists() {
-        validate_export_directory(output)?;
-    } else if fs::symlink_metadata(output).is_ok() {
-        return Err(ExportError::new("export path is not an owned directory"));
+    let directory = open_export_directory(output)?;
+    let previous = artifact_names(&directory)?;
+    for (name, contents) in snapshot
+        .iter()
+        .filter(|(name, _)| name.as_str() != "00-MANIFEST.md")
+    {
+        replace_artifact(&directory, name, contents)?;
     }
+    for name in previous {
+        if !snapshot
+            .keys()
+            .any(|expected| expected.as_bytes() == name.as_bytes())
+        {
+            rustix::fs::unlinkat(&directory, name.as_c_str(), AtFlags::empty())
+                .map_err(export_io_error)?;
+        }
+    }
+    if let Some(contents) = snapshot.get("00-MANIFEST.md") {
+        replace_artifact(&directory, "00-MANIFEST.md", contents)?;
+    }
+    Ok(())
+}
+
+fn open_export_directory(output: &Path) -> Result<File, ExportError> {
     let parent = output
         .parent()
         .ok_or_else(|| ExportError::new("export directory has no parent"))?;
+    let name = output
+        .file_name()
+        .ok_or_else(|| ExportError::new("export directory has no name"))?;
+    let flags = OFlags::RDONLY | OFlags::DIRECTORY | OFlags::CLOEXEC | OFlags::NOFOLLOW;
+    let parent = rustix::fs::open(parent, flags, Mode::empty()).map_err(export_io_error)?;
+    match rustix::fs::mkdirat(&parent, name, Mode::from_raw_mode(0o755)) {
+        Ok(()) | Err(rustix::io::Errno::EXIST) => {}
+        Err(error) => return Err(export_io_error(error)),
+    }
+    rustix::fs::openat(&parent, name, flags, Mode::empty())
+        .map(File::from)
+        .map_err(|error| {
+            ExportError::new(format!("export path is not an owned directory: {error}"))
+        })
+}
+
+fn artifact_names(directory: &File) -> Result<Vec<CString>, ExportError> {
+    let entries = Dir::read_from(directory).map_err(export_io_error)?;
+    let mut names = Vec::new();
+    for entry in entries {
+        let entry = entry.map_err(export_io_error)?;
+        let name = entry.file_name();
+        if matches!(name.to_bytes(), b"." | b"..") {
+            continue;
+        }
+        let metadata = rustix::fs::statat(directory, name, AtFlags::SYMLINK_NOFOLLOW)
+            .map_err(export_io_error)?;
+        if rustix::fs::FileType::from_raw_mode(metadata.st_mode) == rustix::fs::FileType::Directory
+        {
+            return Err(ExportError::new("unexpected directory in export output"));
+        }
+        names.push(name.to_owned());
+    }
+    Ok(names)
+}
+
+fn replace_artifact(directory: &File, name: &str, contents: &str) -> Result<(), ExportError> {
     let nonce = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_err(|_| ExportError::new("system clock is before the Unix epoch"))?
         .as_nanos();
-    let temporary = parent.join(format!(
-        ".harness-export.tmp-{}-{nonce}",
-        std::process::id()
-    ));
-    let backup = parent.join(format!(
-        ".harness-export.backup-{}-{nonce}",
-        std::process::id()
-    ));
-    fs::create_dir(&temporary).map_err(|error| {
-        ExportError::new(format!("temporary export could not be created: {error}"))
-    })?;
-    let result = write_snapshot(&temporary, snapshot).and_then(|()| {
-        let had_output = output.exists();
-        if had_output {
-            fs::rename(output, &backup).map_err(|error| {
-                ExportError::new(format!("existing export could not be preserved: {error}"))
-            })?;
-        }
-        match fs::rename(&temporary, output) {
-            Ok(()) => {
-                if had_output {
-                    fs::remove_dir_all(&backup).map_err(|error| {
-                        ExportError::new(format!("obsolete export could not be removed: {error}"))
-                    })?;
-                }
-                Ok(())
-            }
-            Err(error) => {
-                if had_output {
-                    let _ = fs::rename(&backup, output);
-                }
-                Err(ExportError::new(format!(
-                    "new export could not be published: {error}"
-                )))
-            }
-        }
+    let temporary = format!(".arnes-export-{}-{nonce}", std::process::id());
+    let flags = OFlags::WRONLY | OFlags::CREATE | OFlags::EXCL | OFlags::CLOEXEC | OFlags::NOFOLLOW;
+    let mut file = File::from(
+        rustix::fs::openat(
+            directory,
+            temporary.as_str(),
+            flags,
+            Mode::from_raw_mode(0o600),
+        )
+        .map_err(export_io_error)?,
+    );
+    let result = file.write_all(contents.as_bytes()).and_then(|()| {
+        rustix::fs::renameat(directory, temporary.as_str(), directory, name)
+            .map_err(io::Error::from)
     });
-    if temporary.exists() {
-        let _ = fs::remove_dir_all(&temporary);
+    if result.is_err() {
+        rustix::fs::unlinkat(directory, temporary.as_str(), AtFlags::empty())
+            .map_err(export_io_error)?;
     }
-    result
+    result.map_err(|error| {
+        ExportError::new(format!(
+            "export artifact {name} could not be written: {error}"
+        ))
+    })
 }
 
-fn write_snapshot(
-    directory: &Path,
-    snapshot: &BTreeMap<String, String>,
-) -> Result<(), ExportError> {
-    for (name, contents) in snapshot {
-        fs::write(directory.join(name), contents).map_err(|error| {
-            ExportError::new(format!(
-                "export artifact {name} could not be written: {error}"
-            ))
-        })?;
-    }
-    Ok(())
+fn export_io_error(error: rustix::io::Errno) -> ExportError {
+    ExportError::new(format!("export output could not be updated: {error}"))
 }

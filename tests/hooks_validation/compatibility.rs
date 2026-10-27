@@ -10,7 +10,10 @@ fn documented_fields_and_unknown_extensions_are_preserved()
 fn assert_codex_fields_preserved() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let harness = Harness::new()?;
     harness.write("codex", &codex_documented_fields())?;
-    assert_success(&harness.install("codex")?, "codex SessionEnd command valid");
+    assert_success(
+        &harness.diagnose("codex")?,
+        "codex SessionEnd command valid",
+    );
     let codex: Value = serde_json::from_slice(&fs::read(harness.config("codex")?)?)?;
     let hooks = (*(*(*(codex).get("hooks").ok_or("missing fixture index hooks")?)
         .get("SessionEnd")
@@ -39,7 +42,7 @@ fn assert_claude_fields_preserved() -> Result<(), Box<dyn std::error::Error + Se
     let harness = Harness::new()?;
     harness.write("claude-code", &claude_documented_fields())?;
     assert_success(
-        &harness.install("claude-code")?,
+        &harness.diagnose("claude-code")?,
         "claude Stop all variants valid",
     );
     let claude: Value = serde_json::from_slice(&fs::read(harness.config("claude-code")?)?)?;
@@ -67,7 +70,7 @@ fn assert_cursor_fields_preserved() -> Result<(), Box<dyn std::error::Error + Se
     let harness = Harness::new()?;
     harness.write("cursor", &cursor_documented_fields())?;
     assert_success(
-        &harness.install("cursor")?,
+        &harness.diagnose("cursor")?,
         "cursor stop command valid object matcher",
     );
     let cursor: Value = serde_json::from_slice(&fs::read(harness.config("cursor")?)?)?;
@@ -190,7 +193,7 @@ fn assert_future_extension_preserved(
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let harness = Harness::new()?;
     harness.write(agent, value)?;
-    assert_success(&harness.install(agent)?, agent);
+    assert_success(&harness.diagnose(agent)?, agent);
     let installed: Value = serde_json::from_slice(&fs::read(harness.config(agent)?)?)?;
     let handler = match agent {
         "cursor" => (*(*(installed)

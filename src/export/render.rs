@@ -145,7 +145,10 @@ pub(super) fn read_metadata(path: &Path) -> Result<Metadata, ExportError> {
     }
     let repository_state =
         field(&input, "Repository state at generation (informational)")?.to_owned();
-    if !matches!(repository_state.as_str(), "clean" | "dirty") {
+    if !matches!(
+        repository_state.as_str(),
+        "clean" | "dirty" | "not-inspected"
+    ) {
         return Err(ExportError::new("manifest repository state is invalid"));
     }
     let metadata = Metadata {

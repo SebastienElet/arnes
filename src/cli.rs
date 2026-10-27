@@ -1,10 +1,12 @@
 use arnes::diagnostic::ColorMode;
-use arnes::hooks::SetupHooksArgs;
 use arnes::manifest::{Agent, Scope};
 use clap::{Parser, Subcommand, ValueEnum};
 
 #[derive(Parser)]
-#[command(version, about = "Diagnose agent harness resources")]
+#[command(
+    version,
+    about = "Verify agent harness configuration without modifying it"
+)]
 pub struct Cli {
     #[command(subcommand)]
     pub(crate) command: Command,
@@ -12,18 +14,17 @@ pub struct Cli {
 
 #[derive(Subcommand)]
 pub enum Command {
-    Sync(crate::sync_cli::SyncArgs),
+    #[command(about = "Export sources only into .harness-export; never install configuration")]
     Export {
         #[arg(long)]
         sources: Option<std::path::PathBuf>,
         #[arg(long)]
         check: bool,
     },
+    #[command(
+        about = "Report configuration drift without writing; installation belongs to your dotfiles manager"
+    )]
     Doctor(DoctorArgs),
-    Setup {
-        #[command(subcommand)]
-        command: SetupCommand,
-    },
 }
 
 #[derive(clap::Args)]
@@ -44,11 +45,6 @@ pub struct DoctorArgs {
     pub path: Option<std::path::PathBuf>,
     #[arg(long)]
     pub local: bool,
-}
-
-#[derive(Subcommand, Clone, Copy)]
-pub enum SetupCommand {
-    Hooks(SetupHooksArgs),
 }
 
 #[derive(Clone, Copy, Eq, PartialEq, ValueEnum)]
@@ -90,6 +86,8 @@ impl From<Color> for ColorMode {
     }
 }
 
+/// # Errors
+/// Returns an error when verbose or forced-color output is combined with JSON.
 pub fn validate_render_options(
     format: Format,
     verbose: bool,

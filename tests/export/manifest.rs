@@ -38,7 +38,7 @@ fn records_metadata_sources_and_symlink_identity()
     generate(&fixture)?;
     let manifest = fs::read_to_string(fixture.repository().join(".harness-export/00-MANIFEST.md"))?;
     assert!(manifest.contains("Format version: `1`"));
-    assert!(manifest.contains("Repository state at generation (informational): `dirty`"));
+    assert!(manifest.contains("Repository state at generation (informational): `not-inspected`"));
     assert!(manifest.contains("Metadata SHA256: `"));
     assert!(manifest.contains("| Source | Kind | Bundle | SHA256 | Bytes | Lines |"));
     for (path, _) in REQUIRED_SOURCES {

@@ -40,14 +40,14 @@ impl Harness {
             _ => return Err(format!("unsupported test agent: {agent}").into()),
         }))
     }
-    fn install(&self, agent: &str) -> Result<Output, Box<dyn std::error::Error + Send + Sync>> {
+    fn diagnose(&self, agent: &str) -> Result<Output, Box<dyn std::error::Error + Send + Sync>> {
         let agent = if agent == "claude-code" {
             "claude"
         } else {
             agent
         };
         Ok(Command::new(env!("CARGO_BIN_EXE_arnes"))
-            .args(["setup", "hooks", "--agent", agent])
+            .args(["doctor", "hooks", "--agent", agent, "--format", "json"])
             .env_clear()
             .env("HOME", &self.home)
             .current_dir(&self.repository)
@@ -78,16 +78,19 @@ fn assert_failure_without_mutation(
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let harness = Harness::new()?;
     let before = harness.write(agent, config)?;
-    let output = harness.install(agent)?;
+    let output = harness.diagnose(agent)?;
     assert_eq!(output.status.code(), Some(2), "{label}");
-    assert!(!output.stderr.is_empty(), "{label}");
+    assert!(
+        String::from_utf8_lossy(&output.stdout).contains("invalid"),
+        "{label}"
+    );
     assert_eq!(fs::read(harness.config(agent)?)?, before, "{label}");
     Ok(())
 }
 fn assert_success(output: &Output, label: &str) {
     assert_eq!(
         output.status.code(),
-        Some(0),
+        Some(1),
         "{label}: {}",
         String::from_utf8_lossy(&output.stderr)
     );

@@ -1,4 +1,4 @@
-use super::super::{MatchedHandler, ownership};
+use super::super::MatchedHandler;
 use serde_json::Value;
 
 pub fn events(config: &Value, nested: bool, command: &str) -> Vec<String> {
@@ -21,11 +21,11 @@ fn contains(entries: &Value, nested: bool, command: &str) -> bool {
             .iter()
             .filter_map(|group| group.get("hooks").and_then(Value::as_array))
             .flatten()
-            .any(|handler| ownership::nested(handler, command));
+            .any(|handler| command_matches(handler, command, false));
     }
     entries
         .iter()
-        .any(|handler| ownership::direct(handler, command))
+        .any(|handler| command_matches(handler, command, true))
 }
 
 pub fn matched_handler(config: &Value, settings: &MatchedHandler, command: &str) -> bool {
@@ -44,11 +44,17 @@ pub fn matched_handler(config: &Value, settings: &MatchedHandler, command: &str)
                 .and_then(Value::as_array)
                 .into_iter()
                 .flatten()
-                .filter(move |handler| ownership::nested(handler, command))
+                .filter(move |handler| command_matches(handler, command, false))
                 .map(move |handler| (group, handler))
         })
         .collect::<Vec<_>>();
     matches!(installed.as_slice(), [(group, handler)] if group.get("matcher").and_then(Value::as_str) == Some(settings.matcher)
         && handler.get("timeout").and_then(Value::as_u64) == Some(settings.timeout_seconds)
         && ["async", "asyncRewake", "once", "if"].iter().all(|field| handler.get(*field).is_none()))
+}
+
+fn command_matches(handler: &Value, command: &str, implicit_type: bool) -> bool {
+    let kind = handler.get("type").and_then(Value::as_str);
+    (kind == Some("command") || (implicit_type && kind.is_none()))
+        && handler.get("command").and_then(Value::as_str) == Some(command)
 }
