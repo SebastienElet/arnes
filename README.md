@@ -26,6 +26,9 @@ for resource commands. Existing manifest schema 1 is retained.
 
 `arnes export --sources export.json` exports an explicit JSON object mapping relative
 file paths to `instructions`, `commands-rules`, `skills`, `hooks-routing` or `services`.
+The `--sources` filename is resolved from the current working directory; paths inside
+the JSON object are resolved from `ARNES_REPOSITORY_ROOT`. Use an absolute filename
+to select the same JSON file from any working directory.
 `--check` detects drift. Sources must remain inside the supplied root; ignored, sensitive,
 non-regular and hardlinked sources are refused. Name-based secret detection is limited.
 Exports default to `.harness-export`. The old harness layout remains available when
