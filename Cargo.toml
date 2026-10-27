@@ -2,7 +2,7 @@
 name = "arnes"
 version = "0.0.3"
 edition = "2024"
-description = "Inspection and deployment of coding-agent configuration."
+description = "Read-only verification and isolated export of coding-agent configuration."
 license-file = "LICENSE"
 repository = "https://github.com/SebastienElet/arnes"
 readme = "README.md"

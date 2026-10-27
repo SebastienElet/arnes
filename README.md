@@ -1,12 +1,12 @@
 # Arnes
 
-Configuration, diagnostics, synchronization and export for Claude, Codex and Cursor.
+Read-only configuration verification for Claude, Codex and Cursor.
 Prepared locally for `@sebastienelet/arnes@0.0.3`; no registry release is qualified yet.
 
 | Capability | Owner / public command |
 | --- | --- |
-| Configuration and diagnosis | `@sebastienelet/arnes`: `arnes doctor` |
-| Synchronization and hook declarations | `@sebastienelet/arnes`: `arnes sync`, `arnes setup hooks` |
+| Read-only verification | `@sebastienelet/arnes`: `arnes doctor` |
+| Configuration installation, links and hook activation | Your dotfiles manager |
 | Configuration export | `@sebastienelet/arnes`: `arnes export` |
 | Capture, outcomes, feedback and reports | `@sebastienelet/agent-measure`: `agent-measure` |
 | Evaluation, validation and comparison | `@sebastienelet/agent-experiments`: `agent-experiments` |
@@ -14,7 +14,10 @@ Prepared locally for `@sebastienelet/arnes@0.0.3`; no registry release is qualif
 
 Use Bun 1.4.3 to acquire the exact published version once available. macOS ARM64 and
 Linux x64 glibc are the intended native targets; other targets are rejected. Installation
-only acquires files. Hook activation is explicit through `arnes setup hooks`.
+only acquires the tool. Your dotfiles manager installs configuration and activates hooks.
+Arnes never installs, migrates, removes or repairs harness configuration. The former
+`sync` and `setup hooks` commands have been removed; migrate their callers to your
+dotfiles manager.
 
 Set `ARNES_MANIFEST` to an absolute YAML manifest and `ARNES_REPOSITORY_ROOT` to an
 existing absolute configuration/resource directory. It defaults to the working directory.
@@ -28,14 +31,24 @@ for resource commands. Existing manifest schema 1 is retained.
 file paths to `instructions`, `commands-rules`, `skills`, `hooks-routing` or `services`.
 `--check` detects drift. Sources must remain inside the supplied root; ignored, sensitive,
 non-regular and hardlinked sources are refused. Name-based secret detection is limited.
-Exports default to `.harness-export`. The old harness layout remains available when
-`--sources` is omitted, for compatibility with existing exports.
+Exports write only into `.harness-export` under `ARNES_REPOSITORY_ROOT` (the working
+directory by default), including temporary files. Existing export files are replaced,
+obsolete artifacts are removed, and links are never followed when writing artifacts.
+Replacement is atomic per file; rerun an interrupted export to complete the snapshot.
+`--check` never writes. Git inspection disables fsmonitor, traces and index refresh;
+it does not run status or content filters. Repository cleanliness is recorded as
+`not-inspected`; source hashes still detect export drift. Creating
+the export directory updates its parent directory entry; source and harness files
+remain untouched. The old harness layout remains available when `--sources` is omitted,
+for compatibility with existing exports.
 
 Measurement hooks invoke `~/.local/bin/agent-measure hook --agent …`. The optional
 output-discipline hook invokes `~/.local/bin/output-discipline-hook`, owned with its
 skill by agent-skills. Arnes does not ship that injector. Acquisition and activation of
-these companions remain separate. Missing required executables prevent hook setup;
-foreign handlers are preserved. Doctor reports observed configuration, not activation.
+these companions remain separate and belong to your dotfiles manager. `doctor hooks`
+reports missing executables, absent declared hooks and undeclared or legacy handlers
+(including old `arnes measure hook` commands). It never executes or rewrites them.
+`doctor` exits 0 when healthy, 1 on drift and 2 on invalid or unreadable input.
 
 Contribute with Rust 1.98.1, Bun 1.4.3 and Git: `bun install --frozen-lockfile`,
 `cargo test --locked`, `bun run build`, `bun test tests/launcher.test.mjs`.

@@ -14,8 +14,7 @@ fn doctor(
     run(fixture, &["doctor", "hooks", "--agent", "claude", "-v"])
 }
 #[test]
-fn setup_makes_the_declared_hooks_healthy() -> Result<(), Box<dyn std::error::Error + Send + Sync>>
-{
+fn declared_installed_hooks_are_healthy() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let fixture = installed_fixture()?;
     let (code, stdout, stderr) = doctor(&fixture)?;
     assert_eq!(code, 0, "{stdout}");
@@ -31,14 +30,20 @@ fn setup_makes_the_declared_hooks_healthy() -> Result<(), Box<dyn std::error::Er
     Ok(())
 }
 #[test]
-fn setup_makes_the_declared_memory_hook_healthy()
+fn declared_installed_memory_hook_is_healthy()
 -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let fixture = support::Fixture::new()?;
     fixture.write_home(".arnes.yaml", hook_support::MEMORY_MANIFEST)?;
     executable(&fixture, "agent-measure")?;
     executable(&fixture, "agent-memory")?;
-    let (setup_code, _, setup_stderr) = run(&fixture, &["setup", "hooks", "--agent", "claude"])?;
-    assert_eq!(setup_code, 0, "{setup_stderr}");
+    let command = format!(
+        "'{}' hook --agent claude",
+        fixture.home().join(".local/bin/agent-memory").display()
+    );
+    write_settings(
+        &fixture,
+        &json!({"hooks":{"UserPromptSubmit":[{"hooks":[{"type":"command","command":command}]}]}}),
+    )?;
     let (code, stdout, stderr) = doctor(&fixture)?;
     assert_eq!(code, 0, "{stdout}");
     assert!(
@@ -267,29 +272,14 @@ fn the_default_doctor_reports_hooks() -> Result<(), Box<dyn std::error::Error + 
     Ok(())
 }
 #[test]
-fn setup_restores_health_after_drift() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let fixture = installed_fixture()?;
-    let mut config = settings(&fixture)?;
-    (*(config)
-        .get_mut("hooks")
-        .ok_or("missing fixture index hooks")?)
-    .as_object_mut()
-    .ok_or("expected JSON object")?
-    .remove("Stop");
-    write_settings(&fixture, &config)?;
-    assert_eq!(doctor(&fixture)?.0, 1);
-    let (code, _, stderr) = run(&fixture, &["setup", "hooks", "--agent", "claude"])?;
-    assert_eq!(code, 0, "{stderr}");
-    assert_eq!(doctor(&fixture)?.0, 0, "{}", doctor(&fixture)?.1);
-    Ok(())
-}
-#[test]
 fn direct_hook_entries_are_recognised() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let fixture = support::Fixture::new()?;
     fixture.write_home(".arnes.yaml", hook_support::CURSOR_MANIFEST)?;
     hook_support::executable(&fixture, "agent-measure")?;
-    let (code, _, stderr) = run(&fixture, &["setup", "hooks", "--agent", "cursor"])?;
-    assert_eq!(code, 0, "{stderr}");
+    fixture.write_home(
+        ".cursor/hooks.json",
+        &hook_support::cursor_hooks(&fixture).to_string(),
+    )?;
     let (code, stdout, _) = run(&fixture, &["doctor", "hooks", "--agent", "cursor", "-v"])?;
     assert_eq!(code, 0, "{stdout}");
     assert!(
@@ -368,4 +358,52 @@ fn measurement_command(config: &Value) -> Result<String, Box<dyn std::error::Err
         .ok_or("expected JSON string")?
         .to_owned(),
     )
+}
+
+#[test]
+fn legacy_hooks_are_reported_without_migration()
+-> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    for (agent, path) in [
+        ("claude", ".claude/settings.json"),
+        ("codex", ".codex/hooks.json"),
+        ("cursor", ".cursor/hooks.json"),
+    ] {
+        let fixture = support::Fixture::new()?;
+        fixture.write_home(
+            ".arnes.yaml",
+            &format!("version: 1\nagents:\n  - {{id: {agent}, scopes: [user]}}\nresources: []\n"),
+        )?;
+        let legacy = format!(
+            "'{}' measure hook --agent {agent}",
+            fixture.home().join(".local/bin/arnes").display()
+        );
+        let output_discipline = format!(
+            "'{}'",
+            fixture
+                .home()
+                .join(".local/bin/output-discipline-hook")
+                .display()
+        );
+        let handlers = json!([{"type":"command", "command":legacy}, {"type":"command", "command":output_discipline}]);
+        let config = if agent == "cursor" {
+            json!({"version":1,"hooks":{"stop":handlers}})
+        } else {
+            json!({"hooks":{"Stop":[{"hooks":handlers}]}})
+        };
+        fixture.write_home(path, &config.to_string())?;
+        let before = fixture.snapshot()?;
+        let (code, stdout, stderr) = run(
+            &fixture,
+            &["doctor", "hooks", "--agent", agent, "--format", "json"],
+        )?;
+        assert_eq!(code, 1, "{stdout}");
+        assert!(stdout.contains("measure hook"), "{stdout}");
+        assert!(
+            stdout.contains("output-discipline hook is installed but not declared"),
+            "{stdout}"
+        );
+        assert!(stderr.is_empty());
+        assert_eq!(fixture.snapshot()?, before);
+    }
+    Ok(())
 }

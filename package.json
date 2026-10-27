@@ -1,7 +1,7 @@
 {
   "name": "@sebastienelet/arnes",
   "version": "0.0.3",
-  "description": "Coding-agent configuration, diagnostics, sync and export",
+  "description": "Read-only coding-agent configuration verification and isolated export",
   "type": "module",
   "license": "BSD-3-Clause",
   "repository": {

@@ -93,7 +93,7 @@ fn cursor_accepts_both_documented_matcher_shapes()
                 &json ! ({ "command" : "x" , "matcher" : matcher }),
             ),
         )?;
-        assert_success(&harness.install("cursor")?, label);
+        assert_success(&harness.diagnose("cursor")?, label);
     };
     Ok(())
 }

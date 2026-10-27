@@ -154,3 +154,41 @@ fn export_path_symlinks_and_regular_files_are_refused_without_mutation()
     };
     Ok(())
 }
+
+#[test]
+fn artifact_links_never_modify_their_targets()
+-> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    for hardlink in [false, true] {
+        let fixture = configured_fixture()?;
+        generate(&fixture)?;
+        let target = fixture.home().join("sentinel");
+        fs::write(&target, "unchanged\n")?;
+        let before = fs::metadata(&target)?.modified()?;
+        let artifact = fixture.repository().join(".harness-export/00-MANIFEST.md");
+        fs::remove_file(&artifact)?;
+        if hardlink {
+            fs::hard_link(&target, &artifact)?;
+        } else {
+            symlink(&target, &artifact)?;
+        }
+        generate(&fixture)?;
+        assert_eq!(fs::read(&target)?, b"unchanged\n");
+        assert_eq!(fs::metadata(&target)?.modified()?, before);
+        assert!(arnes(&fixture, &["export", "--check"])?.status.success());
+    }
+    Ok(())
+}
+
+#[test]
+fn unexpected_output_directories_fail_before_replacing_artifacts()
+-> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let fixture = configured_fixture()?;
+    generate(&fixture)?;
+    fs::create_dir(fixture.repository().join(".harness-export/unexpected"))?;
+    let before = fixture.snapshot()?;
+    let output = arnes(&fixture, &["export"])?;
+    assert_eq!(output.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("unexpected directory"));
+    assert_eq!(fixture.snapshot()?, before);
+    Ok(())
+}

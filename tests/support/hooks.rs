@@ -1,5 +1,5 @@
 use crate::support::Fixture;
-use serde_json::Value;
+use serde_json::{Value, json};
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
@@ -59,20 +59,13 @@ pub fn configured_fixture() -> Result<Fixture, Box<dyn std::error::Error + Send 
 }
 /// # Errors
 /// Returns an error if the fixture files, directories or symbolic links cannot be prepared.
-///
-/// # Panics
-/// Panics if hook installation fails.
 pub fn installed_fixture() -> Result<Fixture, Box<dyn std::error::Error + Send + Sync>> {
     let fixture = configured_fixture()?;
-    let (code, _, stderr) = run(&fixture, &["setup", "hooks", "--agent", "claude"])?;
-    assert_eq!(code, 0, "{stderr}");
+    write_settings(&fixture, &claude_hooks(&fixture))?;
     Ok(fixture)
 }
 /// # Errors
 /// Returns an error if the fixture files, directories or symbolic links cannot be prepared.
-///
-/// # Panics
-/// Panics if hook installation fails.
 pub fn linked_handoff_fixture() -> Result<Fixture, Box<dyn std::error::Error + Send + Sync>> {
     let fixture = Fixture::new()?;
     fixture.write_home(".arnes.yaml", MANIFEST)?;
@@ -84,8 +77,7 @@ pub fn linked_handoff_fixture() -> Result<Fixture, Box<dyn std::error::Error + S
     let alias = fixture.home().join(".local/bin/agent-handoff");
     fs::create_dir_all(alias.parent().ok_or("fixture path has no parent")?)?;
     std::os::unix::fs::symlink(&target, &alias)?;
-    let (code, _, stderr) = run(&fixture, &["setup", "hooks", "--agent", "claude"])?;
-    assert_eq!(code, 0, "{stderr}");
+    write_settings(&fixture, &claude_hooks(&fixture))?;
     Ok(fixture)
 }
 /// # Errors
@@ -146,4 +138,70 @@ pub fn run(
         String::from_utf8(output.stdout)?,
         String::from_utf8(output.stderr)?,
     ))
+}
+
+#[must_use]
+pub fn claude_hooks(fixture: &Fixture) -> Value {
+    let command = format!(
+        "'{}' hook --agent claude-code",
+        fixture.home().join(".local/bin/agent-measure").display()
+    );
+    let mut hooks = serde_json::Map::new();
+    for event in [
+        "SessionStart",
+        "UserPromptSubmit",
+        "PreToolUse",
+        "PermissionRequest",
+        "PermissionDenied",
+        "PostToolUse",
+        "PostToolUseFailure",
+        "SubagentStart",
+        "SubagentStop",
+        "Stop",
+        "StopFailure",
+        "PreCompact",
+        "PostCompact",
+        "SessionEnd",
+    ] {
+        hooks.insert(
+            event.to_owned(),
+            json!([{"hooks":[{"type":"command","command":command}]}]),
+        );
+    }
+    if let Some(stop) = hooks
+        .get_mut("Stop")
+        .and_then(Value::as_array_mut)
+        .and_then(|entries| entries.first_mut())
+        .and_then(|entry| entry.get_mut("hooks"))
+        .and_then(Value::as_array_mut)
+    {
+        stop.push(json!({"type":"command","command":fixture.home().join(".local/bin/agent-handoff").display().to_string()}));
+    }
+    json!({"hooks":hooks})
+}
+
+#[must_use]
+pub fn cursor_hooks(fixture: &Fixture) -> Value {
+    let command = format!(
+        "'{}' hook --agent cursor",
+        fixture.home().join(".local/bin/agent-measure").display()
+    );
+    let hooks = [
+        "sessionStart",
+        "beforeSubmitPrompt",
+        "preToolUse",
+        "postToolUse",
+        "postToolUseFailure",
+        "subagentStart",
+        "subagentStop",
+        "afterAgentResponse",
+        "stop",
+        "preCompact",
+        "postCompact",
+        "sessionEnd",
+    ]
+    .into_iter()
+    .map(|event| (event.to_owned(), json!([{"command":command}])))
+    .collect::<serde_json::Map<_, _>>();
+    json!({"version":1,"hooks":hooks})
 }

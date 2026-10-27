@@ -1,7 +1,7 @@
 use crate::support::Fixture;
 use std::fs;
 use std::os::unix::fs::{PermissionsExt, symlink};
-const MANIFEST: &str = "version: 1
+pub const MANIFEST: &str = "version: 1
 agents:
   - id: claude
     scopes: [user, project]
@@ -69,6 +69,8 @@ pub const ORDER: [&str; 10] = [
     "mcp",
     "statusline",
 ];
+/// # Errors
+/// Returns errors preparing fixture files, links or permissions.
 pub fn configured_fixture() -> Result<Fixture, Box<dyn std::error::Error + Send + Sync>> {
     let fixture = Fixture::new()?;
     fixture.write_home(".arnes.yaml", MANIFEST)?;
@@ -96,8 +98,16 @@ pub fn configured_fixture() -> Result<Fixture, Box<dyn std::error::Error + Send 
     )?;
     fixture.write_home(".local/bin/agent-handoff", "binary\n")?;
     set_mode(&fixture.home().join(".local/bin/agent-handoff"), 0o700)?;
-    let setup = fixture.command(["setup", "hooks", "--agent", "claude"])?;
-    assert_eq!(setup.status.code(), Some(0));
+    let command = fixture
+        .home()
+        .join(".local/bin/agent-handoff")
+        .display()
+        .to_string();
+    fixture.write_home(
+        ".claude/settings.json",
+        &serde_json::json!({"hooks":{"Stop":[{"hooks":[{"type":"command","command":command}]}]}})
+            .to_string(),
+    )?;
     Ok(fixture)
 }
 fn link_home(
@@ -113,6 +123,8 @@ fn link_home(
     )?;
     Ok(())
 }
+/// # Errors
+/// Returns errors reading or updating fixture permissions.
 pub fn set_mode(
     path: &std::path::Path,
     mode: u32,

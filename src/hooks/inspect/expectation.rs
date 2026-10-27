@@ -37,7 +37,7 @@ pub fn expectation(
             let path = roots.home().join(".local/bin/output-discipline-hook");
             Ok(Expectation {
                 events: vec!["SessionStart"],
-                nested: true,
+                nested: policy.nested,
                 command: output_discipline_command(&path)?,
                 superseded: Vec::new(),
                 settings: Some(OUTPUT_DISCIPLINE),

@@ -1,51 +1,6 @@
 use std::{fs, process::Command};
 
 #[test]
-fn sync_uses_explicit_sources_without_a_dotfiles_layout() -> Result<(), Box<dyn std::error::Error>>
-{
-    let fixture = tempfile::tempdir()?;
-    let source = fixture.path().join("sources");
-    let home = fixture.path().join("consumer");
-    fs::create_dir_all(&source)?;
-    fs::create_dir_all(&home)?;
-    fs::write(source.join("rules.md"), "shared rule\n")?;
-    let manifest = fixture.path().join("selection.yaml");
-    fs::write(
-        &manifest,
-        "version: 1\nagents:\n  - id: claude\n    scopes: [user]\nresources:\n  - id: rule\n    kind: rules\n    agent: claude\n    scope: user\n    source: { root: repository, path: rules.md }\n    destination: { root: home, path: .claude/rules/example.md }\n",
-    )?;
-    let invoke = || {
-        Command::new(env!("CARGO_BIN_EXE_arnes"))
-            .args(["sync", "rules", "--agent", "claude", "--scope", "user"])
-            .current_dir(fixture.path())
-            .env_clear()
-            .env("HOME", &home)
-            .env("ARNES_SOURCE_ROOT", &source)
-            .env("ARNES_REPOSITORY_ROOT", &source)
-            .env("ARNES_MANIFEST", &manifest)
-            .output()
-    };
-    let output = invoke()?;
-    assert!(
-        output.status.success(),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    assert_eq!(
-        fs::read_to_string(home.join(".claude/rules/example.md"))?,
-        "shared rule\n"
-    );
-    fs::remove_file(home.join(".claude/rules/example.md"))?;
-    fs::write(home.join(".claude/rules/example.md"), "foreign\n")?;
-    assert!(!invoke()?.status.success());
-    assert_eq!(
-        fs::read_to_string(home.join(".claude/rules/example.md"))?,
-        "foreign\n"
-    );
-    Ok(())
-}
-
-#[test]
 fn explicit_sources_reject_relative_missing_and_empty_roots()
 -> Result<(), Box<dyn std::error::Error>> {
     let fixture = tempfile::tempdir()?;
@@ -64,26 +19,6 @@ fn explicit_sources_reject_relative_missing_and_empty_roots()
         assert_eq!(output.status.code(), Some(2), "{root:?}");
         assert!(String::from_utf8_lossy(&output.stdout).contains("ARNES_SOURCE_ROOT"));
     }
-    Ok(())
-}
-
-#[test]
-fn sync_refuses_to_overwrite_its_explicit_manifest() -> Result<(), Box<dyn std::error::Error>> {
-    let fixture = tempfile::tempdir()?;
-    fs::create_dir(fixture.path().join(".claude"))?;
-    fs::create_dir(fixture.path().join("source"))?;
-    let manifest = fixture.path().join(".claude/settings.json");
-    let contents = r#"{"version":1,"agents":[{"id":"claude","scopes":["user"],"user_config":{"model":"expected"}}],"resources":[]}"#;
-    fs::write(&manifest, contents)?;
-    let output = Command::new(env!("CARGO_BIN_EXE_arnes"))
-        .args(["sync", "config", "--agent", "claude", "--scope", "user"])
-        .current_dir(fixture.path().join("source"))
-        .env_clear()
-        .env("HOME", fixture.path())
-        .env("ARNES_MANIFEST", &manifest)
-        .output()?;
-    assert_eq!(output.status.code(), Some(1));
-    assert_eq!(fs::read_to_string(manifest)?, contents);
     Ok(())
 }
 
@@ -145,21 +80,55 @@ resources:
             .env("ARNES_REPOSITORY_ROOT", &repository)
             .output()
     };
-    for args in [
-        vec!["doctor", "manifest"],
-        vec!["sync", "skills", "--agent", "claude", "--scope", "user"],
-    ] {
-        let output = invoke(&args)?;
-        assert!(
-            output.status.success(),
-            "{}{}",
-            String::from_utf8_lossy(&output.stdout),
-            String::from_utf8_lossy(&output.stderr)
-        );
-    }
+    fs::create_dir_all(home.join(".claude/skills"))?;
+    std::os::unix::fs::symlink(
+        source.join("vendor/custom"),
+        home.join(".claude/skills/alpha"),
+    )?;
+    let output = invoke(&["doctor", "manifest"])?;
+    assert!(
+        output.status.success(),
+        "{}{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_skill_state(
+        &invoke(&[
+            "doctor", "skills", "--agent", "claude", "--scope", "user", "--format", "json",
+        ])?,
+        "healthy",
+    )?;
+    fs::write(
+        source.join("vendor/custom/SKILL.md"),
+        "[missing](missing.md)\n",
+    )?;
+    assert_skill_state(
+        &invoke(&[
+            "doctor", "skills", "--agent", "claude", "--scope", "user", "--format", "json",
+        ])?,
+        "drift",
+    )?;
+    Ok(())
+}
+
+fn assert_skill_state(
+    output: &std::process::Output,
+    state: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let diagnostics: Vec<serde_json::Value> = serde_json::from_slice(&output.stdout)?;
+    let skill = diagnostics
+        .iter()
+        .find(|diagnostic| {
+            diagnostic
+                .get("message")
+                .and_then(serde_json::Value::as_str)
+                .is_some_and(|message| message.contains("managed claude user skill alpha"))
+        })
+        .ok_or("missing managed skill diagnostic")?;
     assert_eq!(
-        fs::canonicalize(home.join(".claude/skills/alpha"))?,
-        fs::canonicalize(source.join("vendor/custom"))?
+        skill.get("state").and_then(serde_json::Value::as_str),
+        Some(state),
+        "{diagnostics:?}"
     );
     Ok(())
 }

@@ -6,21 +6,6 @@ mod parser;
 
 use parser::{Reference, local_references};
 
-pub fn validate(skill: &Path, subject: &str) -> Result<(), Diagnostic> {
-    validate_declared(skill, subject, &[])
-}
-
-pub fn validate_declared(
-    skill: &Path,
-    subject: &str,
-    declared: &[PathBuf],
-) -> Result<(), Diagnostic> {
-    diagnose_declared(skill, subject, declared)
-        .into_iter()
-        .next()
-        .map_or(Ok(()), Err)
-}
-
 pub fn diagnose_declared(skill: &Path, subject: &str, declared: &[PathBuf]) -> Vec<Diagnostic> {
     let main = skill.join("SKILL.md");
     if let Err(diagnostic) = read_skill(skill, &main, subject) {

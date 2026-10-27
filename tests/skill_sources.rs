@@ -58,27 +58,20 @@ fn fixture() -> Result<Fixture, Box<dyn std::error::Error + Send + Sync>> {
 }
 
 #[test]
-fn custom_sources_sync_under_the_slug_and_doctor_checks_the_selected_source() -> TestResult {
+fn doctor_checks_the_selected_custom_source_under_the_slug() -> TestResult {
     for (agent, destination) in [
         ("claude", ".claude/skills/alpha"),
         ("cursor", ".cursor/skills/alpha"),
         ("codex", ".agents/skills/alpha"),
     ] {
         let fixture = fixture()?;
-        let sync = || fixture.command(["sync", "skills", "--agent", agent, "--scope", "user"]);
-        let output = sync()?;
-        assert!(
-            output.status.success(),
-            "{}",
-            String::from_utf8_lossy(&output.stdout)
-        );
-        assert_eq!(
-            fs::canonicalize(fixture.home().join(destination))?,
-            fs::canonicalize(fixture.repository().join("vendor/skills/custom"))?
-        );
+        let destination = fixture.home().join(destination);
+        fs::create_dir_all(destination.parent().ok_or("missing parent")?)?;
+        symlink(
+            fixture.repository().join("vendor/skills/custom"),
+            destination,
+        )?;
         let before = fixture.snapshot()?;
-        assert!(sync()?.status.success());
-        assert_eq!(fixture.snapshot()?, before);
         let doctor = || fixture.command(["doctor", "skills", "--agent", agent, "--scope", "user"]);
         let output = doctor()?;
         assert!(
@@ -124,12 +117,11 @@ fn custom_source_symlinks_within_the_source_root_are_supported() -> TestResult {
         ".arnes.yaml",
         &MANIFEST.replace("vendor/skills/custom", "vendor/skills/alias"),
     )?;
-    let output = fixture.command(["sync", "skills", "--agent", "claude", "--scope", "user"])?;
-    assert!(
-        output.status.success(),
-        "{}",
-        String::from_utf8_lossy(&output.stdout)
-    );
+    fs::create_dir_all(fixture.home().join(".claude/skills"))?;
+    symlink(
+        fixture.repository().join("vendor/skills/alias"),
+        fixture.home().join(".claude/skills/alpha"),
+    )?;
     let output = fixture.command(["doctor", "skills", "--agent", "claude", "--scope", "user"])?;
     assert!(
         output.status.success(),
@@ -140,7 +132,7 @@ fn custom_source_symlinks_within_the_source_root_are_supported() -> TestResult {
 }
 
 #[test]
-fn invalid_custom_sources_are_diagnosed_and_never_published() -> TestResult {
+fn invalid_custom_sources_are_diagnosed_without_writing() -> TestResult {
     for kind in [
         "missing",
         "file",
@@ -210,53 +202,9 @@ fn invalid_custom_sources_are_diagnosed_and_never_published() -> TestResult {
             String::from_utf8_lossy(&output.stdout)
         );
         assert_eq!(fixture.snapshot()?, before);
-        let output = fixture.command(["sync", "skills", "--agent", "claude", "--scope", "user"])?;
-        assert_eq!(
-            output.status.code(),
-            Some(1),
-            "{kind}: {}{}",
-            String::from_utf8_lossy(&output.stdout),
-            String::from_utf8_lossy(&output.stderr)
-        );
-        assert_eq!(fixture.snapshot()?, before, "{kind}");
         assert_eq!(fs::read(outside.path().join("SKILL.md"))?, outside_before);
         assert_eq!(fs::read_link(&destination)?, source);
     }
-    Ok(())
-}
-
-#[test]
-fn rules_cannot_publish_inside_an_unselected_custom_skill_collection() -> TestResult {
-    let fixture = fixture()?;
-    fixture.write_repository("rule.md", "# Rule\n")?;
-    let home = fixture.repository().join("vendor/skills/custom");
-    let manifest = format!(
-        r"{MANIFEST}
-  - id: rule
-    kind: rules
-    agent: claude
-    scope: user
-    source: {{ root: repository, path: rule.md }}
-    destination: {{ root: home, path: .claude/rules/example.md }}
-"
-    );
-    fs::write(home.join(".arnes.yaml"), manifest)?;
-    let before = fixture.snapshot()?;
-    let output = std::process::Command::new(env!("CARGO_BIN_EXE_arnes"))
-        .args(["sync", "rules", "--agent", "claude", "--scope", "user"])
-        .current_dir(fixture.repository())
-        .env_clear()
-        .env("HOME", &home)
-        .env("ARNES_SOURCE_ROOT", fixture.repository())
-        .output()?;
-    assert_eq!(
-        output.status.code(),
-        Some(1),
-        "{}{}",
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
-    );
-    assert_eq!(fixture.snapshot()?, before);
     Ok(())
 }
 

@@ -148,7 +148,7 @@ fn claude_event_variant_matrix_fails_closed_and_accepts_documented_pairs()
     ] {
         let harness = Harness::new()?;
         harness.write("claude-code", &nested(event, &handler))?;
-        assert_success(&harness.install("claude-code")?, label);
+        assert_success(&harness.diagnose("claude-code")?, label);
     };
     Ok(())
 }

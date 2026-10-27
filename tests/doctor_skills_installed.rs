@@ -155,8 +155,5 @@ fn nested_links_to_declared_skills_are_allowed_only_in_installed_user_projection
     )?;
     assert_eq!(code, 2, "{stdout}");
     assert!(stdout.contains("escapes its skill"), "{stdout}");
-    let output = fixture.command(["sync", "skills", "--agent", "claude", "--scope", "user"])?;
-    assert_eq!(output.status.code(), Some(1), "{output:?}");
-    assert!(String::from_utf8(output.stdout)?.contains("escapes its skill"));
     Ok(())
 }
