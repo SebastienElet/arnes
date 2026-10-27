@@ -24,7 +24,7 @@ test("missing optional native package is an explicit failure without fallback", 
     await mkdir(join(directory, "bin"));
     const isolated = join(directory, "bin/arnes.mjs");
     await copyFile(launcher, isolated);
-    const result = Bun.spawnSync([process.execPath, "--no-install", isolated, "--version"]);
+    const result = Bun.spawnSync([process.execPath, isolated, "--version"]);
     expect(result.exitCode).toBe(1);
     expect(result.stderr.toString()).toContain("Missing @sebastienelet/");
     expect(result.stderr.toString()).toContain(`@${isolatedVersion}; install optional dependencies with Bun`);
