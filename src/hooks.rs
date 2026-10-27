@@ -86,12 +86,17 @@ pub fn setup(args: SetupHooksArgs) -> Result<(), HooksError> {
     validate::configuration(&config, args.agent)?;
     retired_remem::remove(&mut config, args.agent, roots.home())?;
     ownership::remove_everywhere(&mut config, args.agent, &measurement)?;
-    let legacy = format!(
-        "{} measure hook --agent {}",
-        quoted_command(&roots.home().join(".local/bin/arnes"))?,
+    let legacy_arnes = quoted_command(&roots.home().join(".local/bin/arnes"))?;
+    let legacy_measurement = format!(
+        "{legacy_arnes} measure hook --agent {}",
         measurement_agent(args.agent)
     );
-    ownership::remove_everywhere(&mut config, args.agent, &legacy)?;
+    ownership::remove_everywhere(&mut config, args.agent, &legacy_measurement)?;
+    ownership::remove_everywhere(
+        &mut config,
+        args.agent,
+        &format!("{legacy_arnes} output-discipline"),
+    )?;
     if let Some(command) = &memory {
         ownership::remove_everywhere(&mut config, args.agent, command)?;
     }
