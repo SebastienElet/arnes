@@ -32,7 +32,7 @@ fn validate_declaration(declaration: &McpDeclaration, index: usize) -> Result<()
     if !valid_name(&declaration.name) {
         return Err(ManifestError::new(
             field("name"),
-            "must be lowercase ASCII kebab-case",
+            "must contain only ASCII letters, digits, hyphens or underscores",
         ));
     }
     validate_transport(declaration, index)?;
@@ -108,12 +108,9 @@ fn validate_environment(declaration: &McpDeclaration, index: usize) -> Result<()
 
 fn valid_name(name: &str) -> bool {
     !name.is_empty()
-        && name.split('-').all(|part| {
-            !part.is_empty()
-                && part
-                    .bytes()
-                    .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit())
-        })
+        && name
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
 }
 
 fn valid_environment_name(name: &str) -> bool {

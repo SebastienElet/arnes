@@ -90,7 +90,7 @@ fn route_within(path: &Path, canonical_root: &Path) -> bool {
     true
 }
 
-fn normalize(path: &Path) -> Option<PathBuf> {
+pub fn normalize(path: &Path) -> Option<PathBuf> {
     let mut normalized = PathBuf::new();
     for component in path.components() {
         match component {
