@@ -180,6 +180,21 @@ impl Manifest {
             .iter()
             .map(|resource| (resource.scope, resource.destination.path.as_path()))
     }
+
+    pub(crate) fn configuration_source(
+        &self,
+        agent: Agent,
+        scope: Scope,
+        destination: &Path,
+    ) -> Option<&Path> {
+        self.0.resources.iter().find_map(|resource| {
+            (resource.kind == ResourceKind::Config
+                && resource.agent == agent
+                && resource.scope == scope
+                && resource.destination.path == destination)
+                .then_some(resource.source.path.as_path())
+        })
+    }
 }
 
 #[derive(Clone, Copy)]
