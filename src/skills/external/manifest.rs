@@ -1,5 +1,5 @@
 use super::model::{Skill, Topology};
-use crate::files::paths::canonical_within;
+use crate::files::paths::{canonical_within, normalize};
 use serde_json::Value;
 use std::collections::HashSet;
 use std::fs;
@@ -13,8 +13,23 @@ pub(super) struct Inspection {
     pub skills: Vec<Skill>,
 }
 
+pub(super) struct ManifestProjection {
+    pub destination: PathBuf,
+    pub source: PathBuf,
+    pub relative_source: PathBuf,
+}
+
 pub(super) fn inspect(root: &Path, candidates: &[&str]) -> Inspection {
-    let manifest = match manifest_path(root, candidates) {
+    inspect_projected(root, candidates, &[], root)
+}
+
+pub(super) fn inspect_projected(
+    root: &Path,
+    candidates: &[&str],
+    projections: &[ManifestProjection],
+    source_root: &Path,
+) -> Inspection {
+    let manifest = match manifest_path(root, candidates, projections, source_root) {
         Ok(Some(manifest)) => manifest,
         Ok(None) => return failure(Topology::Broken, "plugin manifest is missing"),
         Err((topology, detail)) => return failure(topology, detail),
@@ -51,6 +66,8 @@ pub(super) fn inspect(root: &Path, candidates: &[&str]) -> Inspection {
 fn manifest_path(
     root: &Path,
     candidates: &[&str],
+    projections: &[ManifestProjection],
+    source_root: &Path,
 ) -> Result<Option<PathBuf>, (Topology, &'static str)> {
     for candidate in candidates.iter().map(|candidate| root.join(candidate)) {
         match fs::symlink_metadata(&candidate) {
@@ -68,7 +85,8 @@ fn manifest_path(
             }
             Ok(_) => {}
         }
-        if canonical_within(&candidate, root).is_none() {
+        let declared_projection = matches_projection(&candidate, root, projections, source_root);
+        if canonical_within(&candidate, root).is_none() && !declared_projection {
             return Err((
                 Topology::Broken,
                 "plugin manifest resolves outside its root",
@@ -77,6 +95,65 @@ fn manifest_path(
         return Ok(Some(candidate));
     }
     Ok(None)
+}
+
+fn matches_projection(
+    candidate: &Path,
+    root: &Path,
+    projections: &[ManifestProjection],
+    source_root: &Path,
+) -> bool {
+    let Some(parent) = candidate
+        .parent()
+        .and_then(|parent| canonical_within(parent, root))
+    else {
+        return false;
+    };
+    let Ok(target) = fs::read_link(candidate) else {
+        return false;
+    };
+    if !direct_target(&target) {
+        return false;
+    }
+    let target = if target.is_absolute() {
+        target
+    } else {
+        parent.join(target)
+    };
+    let Some(target) = normalize(&target) else {
+        return false;
+    };
+    let Ok(source_root) = fs::canonicalize(source_root) else {
+        return false;
+    };
+    projections.iter().any(|projection| {
+        if candidate != projection.destination || !target.ends_with(&projection.relative_source) {
+            return false;
+        }
+        let mut target_root = target.as_path();
+        for _ in projection.relative_source.components() {
+            let Some(parent) = target_root.parent() else {
+                return false;
+            };
+            target_root = parent;
+        }
+        fs::canonicalize(target_root).is_ok_and(|actual| actual == source_root)
+            && canonical_within(&target, target_root)
+                .is_some_and(|actual| actual == projection.source)
+            && fs::canonicalize(candidate).is_ok_and(|actual| actual == projection.source)
+    })
+}
+
+fn direct_target(target: &Path) -> bool {
+    let mut traversed_name = false;
+    target.components().all(|component| match component {
+        Component::Normal(_) => {
+            traversed_name = true;
+            true
+        }
+        Component::ParentDir => !target.is_absolute() && !traversed_name,
+        Component::CurDir | Component::RootDir | Component::Prefix(_) => true,
+    })
 }
 
 fn skill_paths(root: &Path, value: &Value) -> Result<Vec<PathBuf>, &'static str> {

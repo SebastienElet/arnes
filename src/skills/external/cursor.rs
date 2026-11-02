@@ -14,7 +14,7 @@ pub(super) fn diagnose(roots: &Roots, policy: &Manifest, scope: Scope) -> Vec<Di
         return Vec::new();
     }
     let root = roots.home().join(".cursor/plugins/local");
-    match local_plugins(&root, roots.home()) {
+    match local_plugins(&root, roots, policy) {
         Ok(plugins) => plugin_diagnostics(policy, Agent::Cursor, scope, plugins),
         Err(detail) => vec![Diagnostic::new(
             "skills",
@@ -27,7 +27,12 @@ pub(super) fn diagnose(roots: &Roots, policy: &Manifest, scope: Scope) -> Vec<Di
     }
 }
 
-fn local_plugins(root: &Path, home: &Path) -> Result<Vec<Plugin>, &'static str> {
+fn local_plugins(
+    root: &Path,
+    roots: &Roots,
+    policy: &Manifest,
+) -> Result<Vec<Plugin>, &'static str> {
+    let home = roots.home();
     match fs::symlink_metadata(root) {
         Ok(_) if canonical_within(root, home).is_none() => {
             return Err("local plugin root resolves outside HOME");
@@ -47,13 +52,18 @@ fn local_plugins(root: &Path, home: &Path) -> Result<Vec<Plugin>, &'static str> 
         .collect::<Result<Vec<_>, _>>()
         .map_err(|_| "local plugin root entry could not be read")?
         .into_iter()
-        .filter_map(|entry| inspect_plugin(root, &entry))
+        .filter_map(|entry| inspect_plugin(root, &entry, roots, policy))
         .collect::<Vec<_>>();
     plugins.sort_by(|left, right| left.id.cmp(&right.id));
     Ok(plugins)
 }
 
-fn inspect_plugin(root: &Path, entry: &DirEntry) -> Option<Plugin> {
+fn inspect_plugin(
+    root: &Path,
+    entry: &DirEntry,
+    roots: &Roots,
+    policy: &Manifest,
+) -> Option<Plugin> {
     match entry.file_type() {
         Ok(kind) if !kind.is_dir() && !kind.is_symlink() => return None,
         Err(_) => {
@@ -83,7 +93,30 @@ fn inspect_plugin(root: &Path, entry: &DirEntry) -> Option<Plugin> {
             skills: Vec::new(),
         });
     }
-    let inspected = manifest::inspect(&path, &["plugin.json", ".cursor-plugin/plugin.json"]);
+    let candidates = ["plugin.json", ".cursor-plugin/plugin.json"];
+    let projections = candidates
+        .iter()
+        .filter_map(|candidate| {
+            let destination = path.join(candidate);
+            let relative = destination.strip_prefix(roots.home()).ok()?;
+            let source = policy.configuration_source(Agent::Cursor, Scope::User, relative)?;
+            let canonical_source = canonical_within(
+                &roots.deployment_repository().join(source),
+                roots.deployment_repository(),
+            )?;
+            Some(manifest::ManifestProjection {
+                destination,
+                source: canonical_source,
+                relative_source: source.to_owned(),
+            })
+        })
+        .collect::<Vec<_>>();
+    let inspected = manifest::inspect_projected(
+        &path,
+        &candidates,
+        &projections,
+        roots.deployment_repository(),
+    );
     let id = inspected
         .name
         .clone()

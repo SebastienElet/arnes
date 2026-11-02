@@ -53,8 +53,8 @@ fn rejects_invalid_and_duplicate_declarations()
 -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let _: () = for (mcp, expected) in [
         (
-            "\n  - { name: Bad_Name, agent: claude, scope: user, command: mcp }",
-            "mcp[0].name: must be lowercase ASCII kebab-case",
+            "\n  - { name: 'bad name', agent: claude, scope: user, command: mcp }",
+            "mcp[0].name: must contain only ASCII letters, digits, hyphens or underscores",
         ),
         (
             "\n  - { name: managed, agent: claude, scope: user, command: '' }",
